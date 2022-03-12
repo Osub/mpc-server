@@ -1,5 +1,4 @@
 
-use std::{thread, time};
 use std::collections::HashMap;
 use actix::prelude::*;
 use actix_web::{get, web, http, middleware, App, HttpServer, Responder, HttpRequest, HttpResponse};
