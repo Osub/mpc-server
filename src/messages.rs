@@ -29,14 +29,14 @@ pub struct SignRequest {
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct ProtocolMessage<M> {
-    pub task_id: String,
+    pub room: String,
     pub message: M,
 }
 
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct ProtocolMessageAck {
-    pub task_id: String,
+    pub room: String,
     pub message_id: String,
 }
 

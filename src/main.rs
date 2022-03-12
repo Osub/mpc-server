@@ -3,7 +3,7 @@ mod coordinator;
 mod messages;
 mod cli;
 mod transport;
-mod message_hub;
+mod message_proxy;
 
 extern crate env_logger;
 
