@@ -7,6 +7,7 @@ use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::key
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::OfflineStage;
 use work_queue::{LocalQueue, Queue};
 use serde::{Serialize, Deserialize};
+use anyhow::{Result};
 
 #[derive(Message)]
 #[rtype(result = "()")]
@@ -16,8 +17,8 @@ pub struct KeygenRequest {
     pub n: u16,
 }
 
-#[derive(Message)]
-#[rtype(result = "()")]
+#[derive(Message, Debug)]
+#[rtype(result = "Result<()>")]
 pub struct SignRequest {
     pub room: String,
     pub i: u16,

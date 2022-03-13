@@ -24,6 +24,7 @@ use crate::coordinator::Coordinator;
 use crate::messages::SignRequest;
 use cli::Cli;
 use structopt::StructOpt;
+use std::sync::mpsc::{channel, Sender, sync_channel, SyncSender};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct SignPayload {
@@ -31,7 +32,7 @@ struct SignPayload {
 }
 
 struct AppState {
-    coordinator: Addr<Coordinator>,
+    sender: SyncSender<SignPayload>,
     i: u16,
     s_l: Vec<u16>,
     local_key: LocalKey<Secp256k1>,
@@ -40,13 +41,8 @@ struct AppState {
 struct Task(Box<dyn Fn(&mut LocalQueue<Task>) + Send>);
 
 async fn sign(data: web::Data<AppState>, req: web::Json<SignPayload>) -> impl Responder {
-    println!("handling");
-    data.coordinator.do_send(SignRequest {
-        room: "1234".to_string(),
-        i: data.i.clone(),
-        s_l: data.s_l.clone(),
-        local_key: data.local_key.clone(),
-    });
+    log::info!("handling");
+    data.sender.send(req.0);
     format!("Hi there!")
 }
 
@@ -54,26 +50,50 @@ fn main() -> std::io::Result<()> {
     ::std::env::set_var("RUST_LOG", "info");
     env_logger::init();
     let args: Cli = Cli::from_args();
-
+    let (sender, receiver) = sync_channel::<SignPayload>(1024);
     let sys = actix::System::new();
-    let coordinator = SyncArbiter::start(1, move || Coordinator::default());
+
+    // let c = Coordinator::new(args.messenger_address);
     let local_share = std::fs::read(args.local_share).unwrap();
     let local_share = serde_json::from_slice::<LocalKey<Secp256k1>>(&local_share).unwrap();
-    sys.block_on(
-        HttpServer::new(move || {
-            App::new()
-                .app_data(web::Data::new(AppState {
-                    coordinator: coordinator.clone(),
-                    i: args.index,
-                    s_l: Vec::try_from([1, 2]).unwrap(),
-                    local_key: local_share.clone(),
-                }))
-                .wrap(middleware::Logger::default())
-                .route("/hello", web::get().to(|| async { "Hello World!" }))
-                .route("/sign", web::post().to(sign))
-                // .service(greet)
-        })
-            .bind(("127.0.0.1", args.port))?
-            .run()
-    )
+    // let coordinator = SyncArbiter::start(1, || { c });
+    // let coordinator = c.start();
+
+    let i = args.index.clone();
+    let local_share1 = local_share.clone();
+    let s = async move {
+        let coordinator = Coordinator::new(args.messenger_address).start();
+        while let Ok(r) = receiver.recv() {
+            log::info!("Received request {:?}", r);
+            let result = coordinator.do_send(SignRequest {
+                room: "1234".to_string(),
+                i,
+                s_l: vec![1, 2],
+                local_key: local_share1.clone(),
+            });
+            log::info!("Result is {:?}", result);
+        }
+    };
+
+    Arbiter::new().spawn(s);
+
+    let server = move || { HttpServer::new(move || {
+        App::new()
+            .app_data(web::Data::new(AppState {
+                sender: sender.clone(),
+                i: args.index,
+                s_l: Vec::try_from([1, 2]).unwrap(),
+                local_key: local_share.clone(),
+            }))
+            .wrap(middleware::Logger::default())
+            .route("/hello", web::get().to(|| async { "Hello World!" }))
+            .route("/sign", web::post().to(sign))
+        // .service(greet)
+    })
+        .bind(("127.0.0.1", args.port))
+        .unwrap()
+        .run()
+    };
+
+    sys.block_on(server())
 }

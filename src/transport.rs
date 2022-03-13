@@ -7,8 +7,7 @@ use structopt::StructOpt;
 use round_based::Msg;
 
 pub async fn join_computation<M>(
-    address: surf::Url,
-    room_id: &str,
+    url: surf::Url
 ) -> Result<(
     u16,
     impl Stream<Item = Result<Msg<M>>>,
@@ -17,7 +16,7 @@ pub async fn join_computation<M>(
     where
         M: Serialize + DeserializeOwned,
 {
-    let client = SmClient::new(address, room_id).context("construct SmClient")?;
+    let client = SmClient::new(url).context("construct SmClient")?;
 
     // Construct channel of incoming messages
     let incoming = client
@@ -56,9 +55,9 @@ pub struct SmClient {
 }
 
 impl SmClient {
-    pub fn new(address: surf::Url, room_id: &str) -> Result<Self> {
+    pub fn new(url: surf::Url) -> Result<Self> {
         let config = surf::Config::new()
-            .set_base_url(address.join(&format!("rooms/{}/", room_id))?)
+            .set_base_url(url)
             .set_timeout(None);
         Ok(Self {
             http_client: config.try_into()?,
