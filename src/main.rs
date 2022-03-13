@@ -24,7 +24,7 @@ use crate::coordinator::Coordinator;
 use crate::messages::SignRequest;
 use cli::Cli;
 use structopt::StructOpt;
-use std::sync::mpsc::{channel, Sender, sync_channel, SyncSender};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct SignPayload {
@@ -32,7 +32,7 @@ struct SignPayload {
 }
 
 struct AppState {
-    sender: SyncSender<SignPayload>,
+    sender: UnboundedSender<SignPayload>,
     i: u16,
     s_l: Vec<u16>,
     local_key: LocalKey<Secp256k1>,
@@ -50,7 +50,7 @@ fn main() -> std::io::Result<()> {
     ::std::env::set_var("RUST_LOG", "info");
     env_logger::init();
     let args: Cli = Cli::from_args();
-    let (sender, receiver) = sync_channel::<SignPayload>(1024);
+    let (sender, mut receiver) = unbounded_channel::<SignPayload>();
     let sys = actix::System::new();
 
     // let c = Coordinator::new(args.messenger_address);
@@ -63,7 +63,8 @@ fn main() -> std::io::Result<()> {
     let local_share1 = local_share.clone();
     let s = async move {
         let coordinator = Coordinator::new(args.messenger_address).start();
-        while let Ok(r) = receiver.recv() {
+
+        while let Some(r) = receiver.recv().await {
             log::info!("Received request {:?}", r);
             let result = coordinator.do_send(SignRequest {
                 room: "1234".to_string(),
