@@ -135,13 +135,17 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
         Box::pin(futures::stream::iter(self.state.message_queue().drain(..)).map(Ok))
     }
     fn send_outgoing(&mut self, ctx: &mut Context<Self>){
-        ctx.spawn(self.send_outgoing1());
+        if !self.state.message_queue().is_empty() {
+            ctx.spawn(self.send_outgoing1());
+        }
         // self.send_outgoing1(ctx).spawn(ctx);
     }
     fn send_outgoing1(&mut self)-> FutureInteropWrap<Self, impl Future<Output=()>> {
         // FutureInteropWrap<Self, impl Future<Output=Result<()>>>
         // ->FutureInteropWrap<Self, Result<()>>
         let msg = self.state.message_queue().drain(..).next().context("Not found.");
+        let m = msg.as_ref().expect("Msg");
+        log::info!("Sending message {:?}", serde_json::to_string(&m));
             async move {
                 let (tx, rx) = oneshot::channel();
 
@@ -180,7 +184,7 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
 
                 // Wait for the result concurrently, so many requests can
                 // be pipelined at the same time.
-                rx.recv().expect("Sender should not be dropped");
+                // rx.await.expect("Sender should not be dropped"); // TODO: Check what is this doing and do we need it?
             }.interop_actor(self)
 
         // if !self.state.message_queue().is_empty() {
@@ -229,12 +233,12 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
 
     fn maybe_proceed(&mut self,  ctx: &mut Context<Self>) {
         self.send_outgoing(ctx);
-        // self.refresh_timer();
-        //
-        // self.proceed_if_needed();
-        // self.send_outgoing(ctx);
-        // self.refresh_timer();
-        // self.finish_if_possible();
+        self.refresh_timer();
+
+        self.proceed_if_needed();
+        self.send_outgoing(ctx);
+        self.refresh_timer();
+        self.finish_if_possible();
     }
 }
 
