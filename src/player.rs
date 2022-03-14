@@ -145,7 +145,7 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
         // ->FutureInteropWrap<Self, Result<()>>
         let msg = self.state.message_queue().drain(..).next().context("Not found.");
         let m = msg.as_ref().expect("Msg");
-        log::info!("Sending message {:?}", serde_json::to_string(&m));
+        log::debug!("Sending message {:?}", serde_json::to_string(&m));
             async move {
                 let (tx, rx) = oneshot::channel();
 
@@ -255,6 +255,7 @@ impl<SM> StreamHandler<Result<Msg<SM::MessageBody>>> for MpcPlayer<SM, SM::Err, 
     fn handle(&mut self, msg: Result<Msg<SM::MessageBody>>, ctx: &mut Context<Self>) {
         match msg {
             Ok(m) => {
+                log::debug!("Received message {:?}", serde_json::to_string(&m));
                 self.msgCount += 1;
                 self.handle_incoming(m);
                 self.maybe_proceed(ctx);
@@ -277,12 +278,14 @@ impl<SM> Handler<MaybeProceed> for MpcPlayer<SM, SM::Err, SM::MessageBody, SM::O
     type Result = ();
 
     fn handle(&mut self, msg: MaybeProceed, ctx: &mut Context<Self>) {
-        log::info!("Try to proceed");
         if self.msgCount == 0 {
+            log::debug!("Try to proceed");
             self.maybe_proceed(ctx);
             ctx.run_later(Duration::from_millis(250), | _, _ctx|{
                 _ctx.address().do_send(MaybeProceed{});
             });
+        } else {
+            log::debug!("Ignore proceed");
         }
     }
 }

@@ -47,7 +47,7 @@ async fn sign(data: web::Data<AppState>, req: web::Json<SignPayload>) -> impl Re
 }
 
 fn main() -> std::io::Result<()> {
-    ::std::env::set_var("RUST_LOG", "info");
+    ::std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
     let args: Cli = Cli::from_args();
     let (sender, mut receiver) = unbounded_channel::<SignPayload>();
