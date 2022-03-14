@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use crate::messages::*;
 use actix::prelude::*;
 use crate::player::MpcPlayer;
@@ -57,7 +58,11 @@ impl Handler<SignRequest> for Coordinator {
                 _ctx.address().recipient(),
                 _ctx.address().recipient(),
             );
+            let player1 = Arc::new(player.clone());
             actor.runners.insert(req0.room.to_owned(), player);
+            _ctx.run_later(Duration::from_millis(250), move |_, _| {
+                player1.do_send(MaybeProceed{});
+            });
             Ok(())
         });
         Box::pin(update_self)

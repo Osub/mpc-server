@@ -6,17 +6,25 @@
 //     },
 // };
 
+use std::ops::Deref;
+use std::path::Iter;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::time::Duration;
 use actix::prelude::*;
 use actix_interop::with_ctx;
-use futures::{Sink, SinkExt};
+use actix_web::cookie::time::Month::May;
+use futures::{Sink, SinkExt, StreamExt, TryStream};
 use tokio::time::{self};
-use crate::messages::{OutgoingMessage, ProtocolError, ProtocolMessage, ProtocolOutput};
+use crate::messages::{MaybeProceed, OutgoingMessage, ProtocolError, ProtocolMessage, ProtocolOutput};
 use round_based::{Msg, StateMachine};
 
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use anyhow::{Result};
 
 pub struct MpcPlayer<SM, E: Send, M: Send, O: Send> {
+    msgCount: u16,
+    initialPoller: Option<Box<SpawnHandle>>,
     sink: Option<Pin<Box<dyn Sink<Msg<M>, Error = anyhow::Error>>>>,
     coordinator: Recipient<ProtocolError<E>>,
     state: SM,
@@ -30,7 +38,7 @@ where
     SM: StateMachine + Unpin,
     SM::Err: Send,
     SM: Send + 'static,
-    SM::MessageBody: Send,
+    SM::MessageBody: Send + Serialize,
     SM::Output: Send,
 {
     pub fn new<Si, St>(
@@ -50,12 +58,14 @@ where
         Self::create(|ctx| {
             ctx.add_stream(stream);
             Self {
+                msgCount: 0,
                 sink: Some(sink.into()),
                 coordinator,
                 result_collector,
                 deadline: None,
                 current_round: None,
                 state,
+                initialPoller: None,
             }
         })
     }
@@ -69,10 +79,27 @@ impl<SM> Actor for MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
         SM: StateMachine + Unpin,
         SM::Err: Send,
         SM: Send + 'static,
-        SM::MessageBody: Send,
+        SM::MessageBody: Send + Serialize,
         SM::Output: Send,
 {
     type Context = Context<Self>;
+    fn started(&mut self, ctx: &mut Self::Context) {
+        ctx.address().send(MaybeProceed{});
+    }
+    // fn started(&mut self, ctx: &mut Self::Context) {
+    //     let handle = ctx.run_interval(Duration::from_millis(250), | _actor, _ctx|{
+    //         if _actor.msgCount > 0 {
+    //             if let Some(_h) = _actor.initialPoller.clone() {
+    //                 _actor.initialPoller = None;
+    //                 _ctx.cancel_future(*_h.deref());
+    //             }
+    //         } else {
+    //             _ctx.address().send(MaybeProceed{});
+    //         }
+    //     });
+    //     // let handle1 = handle.clone();
+    //     self.initialPoller = Some(Box::new(handle));
+    // }
 }
 
 impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
@@ -80,7 +107,7 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
         SM: StateMachine + Unpin,
         SM::Err: Send,
         SM: Send + 'static,
-        SM::MessageBody: Send,
+        SM::MessageBody: Send + Serialize,
         SM::Output: Send,
 {
     fn handle_incoming(&mut self, msg: Msg<SM::MessageBody>) {
@@ -100,15 +127,24 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
 
     }
 
-    fn send_outgoing(&mut self) {
+    fn get_outgoing_stream(&mut self)-> Pin<Box<dyn TryStream<Item=Result<Msg<SM::MessageBody>>, Ok=Msg<SM::MessageBody>, Error=anyhow::Error>+'_>>{
+        Box::pin(futures::stream::iter(self.state.message_queue().drain(..)).map(Ok))
+    }
+    fn send_outgoing(&mut self, ctx: &mut Context<Self>) {
         if !self.state.message_queue().is_empty() {
-            let msgs = self.state.message_queue().drain(..);
+            // let x = self.state.message_queue().drain(..).into_iter();
+            // let mut s: Iter<Item=Msg<SM::MessageBody>> =futures::stream::iter(
+            //     self.state.message_queue().drain(..).into_iter()
+            // );
 
-            for msg in msgs {
+
+            actix::fut::wrap_future::<_,Self>({
                 let mut sink = with_ctx(|actor: &mut Self, _| actor.sink.take())
                     .expect("Sink to be present");
-                sink.send(msg);
-            }
+                let mut msgs = with_ctx(|actor: &mut Self, _| actor.get_outgoing_stream());
+                sink.send_all(&mut msgs)
+
+            });
         }
     }
     fn send_result(&mut self, result: SM::Output) {
@@ -136,6 +172,18 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
             }
         }
     }
+
+
+
+    fn maybe_proceed(&mut self,  ctx: &mut Context<Self>) {
+        self.send_outgoing(ctx);
+        self.refresh_timer();
+
+        self.proceed_if_needed();
+        self.send_outgoing(ctx);
+        self.refresh_timer();
+        self.finish_if_possible();
+    }
 }
 
 
@@ -144,24 +192,40 @@ impl<SM> StreamHandler<Result<Msg<SM::MessageBody>>> for MpcPlayer<SM, SM::Err, 
         SM: StateMachine + Unpin,
         SM::Err: Send,
         SM: Send + 'static,
-        SM::MessageBody: Send,
+        SM::MessageBody: Send + Serialize,
         SM::Output: Send,
 {
     fn handle(&mut self, msg: Result<Msg<SM::MessageBody>>, _ctx: &mut Context<Self>) {
         match msg {
             Ok(m) => {
+                self.msgCount += 1;
                 self.handle_incoming(m);
-                self.send_outgoing();
-                self.refresh_timer();
-
-                self.proceed_if_needed();
-                self.send_outgoing();
-                self.refresh_timer();
-                self.finish_if_possible();
+                self.maybe_proceed(_ctx);
             }
             Err(e) => {
                 // Ignore
             }
+        }
+    }
+}
+
+impl<SM> Handler<MaybeProceed> for MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
+    where
+        SM: StateMachine + Unpin,
+        SM::Err: Send,
+        SM: Send + 'static,
+        SM::MessageBody: Send + Serialize,
+        SM::Output: Send,
+{
+    type Result = ();
+
+    fn handle(&mut self, msg: MaybeProceed, ctx: &mut Context<Self>) {
+        log::info!("Try to proceed");
+        if self.msgCount == 0 {
+            self.maybe_proceed(ctx);
+            ctx.run_later(Duration::from_millis(250), | _, _ctx|{
+                _ctx.address().do_send(MaybeProceed{});
+            });
         }
     }
 }
