@@ -74,6 +74,7 @@ where
         })
     }
     fn send_error(&mut self, error: SM::Err) {
+        log::debug!("Sending error");
         self.coordinator.do_send(ProtocolError{error});
     }
 }
@@ -136,6 +137,7 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
     }
     fn send_outgoing(&mut self, ctx: &mut Context<Self>){
         if !self.state.message_queue().is_empty() {
+            log::debug!("Message queue size is {}", self.state.message_queue().len());
             ctx.spawn(self.send_outgoing1());
         }
         // self.send_outgoing1(ctx).spawn(ctx);
@@ -255,10 +257,12 @@ impl<SM> StreamHandler<Result<Msg<SM::MessageBody>>> for MpcPlayer<SM, SM::Err, 
     fn handle(&mut self, msg: Result<Msg<SM::MessageBody>>, ctx: &mut Context<Self>) {
         match msg {
             Ok(m) => {
+                log::debug!("Round before: {}", self.state.current_round());
                 log::debug!("Received message {:?}", serde_json::to_string(&m));
                 self.msgCount += 1;
                 self.handle_incoming(m);
                 self.maybe_proceed(ctx);
+                log::debug!("Round after: {}", self.state.current_round());
             }
             Err(e) => {
                 // Ignore
