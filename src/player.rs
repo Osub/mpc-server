@@ -6,21 +6,25 @@
 //     },
 // };
 
+use std::future::Future;
 use std::ops::Deref;
 use std::path::Iter;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::mpsc::{channel, sync_channel};
 use std::time::Duration;
 use actix::prelude::*;
-use actix_interop::with_ctx;
+use actix_interop::{critical_section, FutureInterop, FutureInteropWrap, with_ctx};
 use actix_web::cookie::time::Month::May;
+use actix_web::error::ErrorNotFound;
 use futures::{Sink, SinkExt, StreamExt, TryStream};
 use tokio::time::{self};
 use crate::messages::{MaybeProceed, OutgoingMessage, ProtocolError, ProtocolMessage, ProtocolOutput};
 use round_based::{Msg, StateMachine};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use anyhow::{Result};
+use anyhow::{Context as AnyhowContext, Error, Result};
+use futures::stream::iter;
 
 pub struct MpcPlayer<SM, E: Send, M: Send, O: Send> {
     msgCount: u16,
@@ -130,22 +134,70 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
     fn get_outgoing_stream(&mut self)-> Pin<Box<dyn TryStream<Item=Result<Msg<SM::MessageBody>>, Ok=Msg<SM::MessageBody>, Error=anyhow::Error>+'_>>{
         Box::pin(futures::stream::iter(self.state.message_queue().drain(..)).map(Ok))
     }
-    fn send_outgoing(&mut self, ctx: &mut Context<Self>) {
-        if !self.state.message_queue().is_empty() {
-            // let x = self.state.message_queue().drain(..).into_iter();
-            // let mut s: Iter<Item=Msg<SM::MessageBody>> =futures::stream::iter(
-            //     self.state.message_queue().drain(..).into_iter()
-            // );
+    fn send_outgoing(&mut self, ctx: &mut Context<Self>){
+        ctx.spawn(self.send_outgoing1());
+        // self.send_outgoing1(ctx).spawn(ctx);
+    }
+    fn send_outgoing1(&mut self)-> FutureInteropWrap<Self, impl Future<Output=()>> {
+        // FutureInteropWrap<Self, impl Future<Output=Result<()>>>
+        // ->FutureInteropWrap<Self, Result<()>>
+        let msg = self.state.message_queue().drain(..).next().context("Not found.");
+            async move {
+                let (tx, rx) = oneshot::channel();
+
+                // Perform sends in a critical section so they are strictly ordered
+                critical_section::<Self, _>(async {
+                    // Take the sink from the actor state
+                    let mut sink = with_ctx(|actor: &mut Self, _| actor.sink.take())
+                        .expect("Sink to be present");
 
 
-            actix::fut::wrap_future::<_,Self>({
-                let mut sink = with_ctx(|actor: &mut Self, _| actor.sink.take())
-                    .expect("Sink to be present");
-                let mut msgs = with_ctx(|actor: &mut Self, _| actor.get_outgoing_stream());
-                sink.send_all(&mut msgs)
+                    let res: Result<()> =  match msg {
+                        Ok(msg) => {
+                            let res0 = sink.send(msg).await;
+                            res0
+                        }
+                        Err(e) => Err(e)
+                    };
 
-            });
-        }
+                    // Send the request
+                    // let res = sink.send(msg).await;
+
+                    // Put the sink back, and if the send was successful,
+                    // record the in-flight request.
+                    with_ctx(|actor: &mut Self, _| {
+                        actor.sink = Some(sink);
+                        match res {
+                            Ok(()) => {},
+                            err => {
+                                // Don't care if the receiver has gone away
+                                let _ = tx.send(err);
+                            }
+                        }
+                    });
+                })
+                    .await;
+
+                // Wait for the result concurrently, so many requests can
+                // be pipelined at the same time.
+                rx.recv().expect("Sender should not be dropped");
+            }.interop_actor(self)
+
+        // if !self.state.message_queue().is_empty() {
+        //     // let x = self.state.message_queue().drain(..).into_iter();
+        //     // let mut s: Iter<Item=Msg<SM::MessageBody>> =futures::stream::iter(
+        //     //     self.state.message_queue().drain(..).into_iter()
+        //     // );
+        //
+        //
+        //     actix::fut::wrap_future::<_,Self>({
+        //         let mut sink = with_ctx(|actor: &mut Self, _| actor.sink.take())
+        //             .expect("Sink to be present");
+        //         let mut msgs = with_ctx(|actor: &mut Self, _| actor.get_outgoing_stream());
+        //         sink.send_all(&mut msgs)
+        //
+        //     });
+        // }
     }
     fn send_result(&mut self, result: SM::Output) {
         self.result_collector.do_send(ProtocolOutput{ output: result});
@@ -177,12 +229,12 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
 
     fn maybe_proceed(&mut self,  ctx: &mut Context<Self>) {
         self.send_outgoing(ctx);
-        self.refresh_timer();
-
-        self.proceed_if_needed();
-        self.send_outgoing(ctx);
-        self.refresh_timer();
-        self.finish_if_possible();
+        // self.refresh_timer();
+        //
+        // self.proceed_if_needed();
+        // self.send_outgoing(ctx);
+        // self.refresh_timer();
+        // self.finish_if_possible();
     }
 }
 
@@ -195,12 +247,13 @@ impl<SM> StreamHandler<Result<Msg<SM::MessageBody>>> for MpcPlayer<SM, SM::Err, 
         SM::MessageBody: Send + Serialize,
         SM::Output: Send,
 {
-    fn handle(&mut self, msg: Result<Msg<SM::MessageBody>>, _ctx: &mut Context<Self>) {
+
+    fn handle(&mut self, msg: Result<Msg<SM::MessageBody>>, ctx: &mut Context<Self>) {
         match msg {
             Ok(m) => {
                 self.msgCount += 1;
                 self.handle_incoming(m);
-                self.maybe_proceed(_ctx);
+                self.maybe_proceed(ctx);
             }
             Err(e) => {
                 // Ignore
