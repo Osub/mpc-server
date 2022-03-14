@@ -14,7 +14,8 @@ use std::sync::Arc;
 use std::sync::mpsc::{channel, sync_channel};
 use std::time::Duration;
 use actix::prelude::*;
-use actix_interop::{critical_section, FutureInterop, FutureInteropWrap, with_ctx};
+use actix_interop::{critical_section, FutureInterop, FutureInteropWrap, StreamInterop, with_ctx};
+use actix_web::body::MessageBody;
 use actix_web::cookie::time::Month::May;
 use actix_web::error::ErrorNotFound;
 use futures::{Sink, SinkExt, StreamExt, TryStream};
@@ -24,7 +25,8 @@ use round_based::{Msg, StateMachine};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use anyhow::{Context as AnyhowContext, Error, Result};
-use futures::stream::iter;
+use futures::stream;
+use futures_util::TryStreamExt;
 
 pub struct MpcPlayer<SM, E: Send, M: Send, O: Send> {
     msgCount: u16,
@@ -135,13 +137,45 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
     fn get_outgoing_stream(&mut self)-> Pin<Box<dyn TryStream<Item=Result<Msg<SM::MessageBody>>, Ok=Msg<SM::MessageBody>, Error=anyhow::Error>+'_>>{
         Box::pin(futures::stream::iter(self.state.message_queue().drain(..)).map(Ok))
     }
+    fn send_one( msg: Msg<SM::MessageBody>)-> impl Future<Output=()> {
+        log::debug!("Sending message {:?}", serde_json::to_string(&msg));
+        async move {
+            // Perform sends in a critical section so they are strictly ordered
+            critical_section::<Self, _>(async {
+                // Take the sink from the actor state
+                let mut sink = with_ctx(|actor: &mut Self, _| actor.sink.take())
+                    .expect("Sink to be present");
+
+                sink.send(msg).await;
+                // Send the request
+                // let res = sink.send(msg).await;
+
+                // Put the sink back, and if the send was successful,
+                // record the in-flight request.
+                with_ctx(|actor: &mut Self, _| {
+                    actor.sink = Some(sink);
+                });
+            })
+                .await;
+        }//.interop_actor(self)
+    }
     fn send_outgoing(&mut self, ctx: &mut Context<Self>){
-        if !self.state.message_queue().is_empty() {
-            log::debug!("Message queue size is {}", self.state.message_queue().len());
-            ctx.spawn(self.send_outgoing1());
+
+        log::debug!("Message queue size is {}", self.state.message_queue().len());
+        for msg in self.state.message_queue().drain(..){
+            ctx.notify(OutgoingMessage {
+                message: msg,
+                room: "not-needed".to_owned(),
+            });
         }
+        // let f_s = stream::iter(self.state.message_queue().drain(..).map(Self::send_one));
+        // ctx.add_stream(f_s);
+        // for f in f_s {
+        //     ctx.spawn(f.interop_actor(self));
+        // }
         // self.send_outgoing1(ctx).spawn(ctx);
     }
+
     fn send_outgoing1(&mut self)-> FutureInteropWrap<Self, impl Future<Output=()>> {
         // FutureInteropWrap<Self, impl Future<Output=Result<()>>>
         // ->FutureInteropWrap<Self, Result<()>>
@@ -149,8 +183,6 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
         let m = msg.as_ref().expect("Msg");
         log::debug!("Sending message {:?}", serde_json::to_string(&m));
             async move {
-                let (tx, rx) = oneshot::channel();
-
                 // Perform sends in a critical section so they are strictly ordered
                 critical_section::<Self, _>(async {
                     // Take the sink from the actor state
@@ -173,13 +205,6 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
                     // record the in-flight request.
                     with_ctx(|actor: &mut Self, _| {
                         actor.sink = Some(sink);
-                        match res {
-                            Ok(()) => {},
-                            err => {
-                                // Don't care if the receiver has gone away
-                                let _ = tx.send(err);
-                            }
-                        }
                     });
                 })
                     .await;
@@ -291,5 +316,20 @@ impl<SM> Handler<MaybeProceed> for MpcPlayer<SM, SM::Err, SM::MessageBody, SM::O
         } else {
             log::debug!("Ignore proceed");
         }
+    }
+}
+
+impl<SM> Handler<OutgoingMessage<Msg<SM::MessageBody>>> for MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
+    where
+        SM: StateMachine + Unpin,
+        SM::Err: Send,
+        SM: Send + 'static,
+        SM::MessageBody: Send + Serialize,
+        SM::Output: Send,
+{
+    type Result = ();
+
+    fn handle(&mut self, msg: OutgoingMessage<Msg<SM::MessageBody>>, ctx: &mut Context<Self>) {
+        ctx.spawn(Self::send_one(msg.message).interop_actor(self));
     }
 }
