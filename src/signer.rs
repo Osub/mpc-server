@@ -57,16 +57,22 @@ impl<I> Signer<I>
             message_broker,
         }
     }
-    fn maybe_complete(&mut self, ctx: &mut Context<Self>) -> Result<()> {
+
+    fn send_my_partial_signature(&mut self) -> Result<()> {
         let message = self.message.clone();
         let completed_offline_stage = self.completed_offline_stage.clone();
-        let (state, partial_sig) = SignManual::new(
+        let (_, partial_sig) = SignManual::new(
             message,
             completed_offline_stage
         )?;
-        match serde_json::to_string(&partial_sig) {
+        let sig_msg = Msg {
+            sender: self.index,
+            receiver: None,
+            body: partial_sig,
+        };
+        match serde_json::to_string(&sig_msg) {
             Ok(serialized) => {
-                log::debug!("Sending message {:?}", serde_json::to_string(&partial_sig));
+                log::debug!("Sending message {:?}", serde_json::to_string(&sig_msg));
                 self.message_broker.do_send(OutgoingEnvelope {
                     room: self.room.clone(),
                     message: serialized,
@@ -74,6 +80,17 @@ impl<I> Signer<I>
             }
             Err(_) => {}
         };
+        Ok(())
+    }
+
+    fn finish_if_possible(&mut self, ctx: &mut Context<Self>) -> Result<()> {
+        let message = self.message.clone();
+        let completed_offline_stage = self.completed_offline_stage.clone();
+        let (state, _) = SignManual::new(
+            message,
+            completed_offline_stage
+        )?;
+
         if self.partial_sigs.len() == self.t {
 
             match state.complete(&self.partial_sigs) {
@@ -97,6 +114,10 @@ impl<I> Actor for Signer<I>
         I: Send + Clone + Unpin + 'static,
 {
     type Context = Context<Self>;
+    fn started(&mut self, ctx: &mut Self::Context) {
+        log::debug!("Started signer");
+        self.send_my_partial_signature();
+    }
 }
 
 impl<I> Handler<IncomingMessage<Msg<PartialSignature>>> for Signer<I>
@@ -107,6 +128,6 @@ impl<I> Handler<IncomingMessage<Msg<PartialSignature>>> for Signer<I>
 
     fn handle(&mut self, msg: IncomingMessage<Msg<PartialSignature>>, ctx: &mut Context<Self>) {
         self.partial_sigs.push(msg.message.body);
-        self.maybe_complete(ctx);
+        self.finish_if_possible(ctx);
     }
 }

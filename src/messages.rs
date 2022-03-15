@@ -93,7 +93,7 @@ pub struct ProtocolError<M> {
     pub error: M,
 }
 
-#[derive(Message)]
+#[derive(Message, Serialize, Deserialize, Clone)]
 #[rtype(result = "()")]
 pub struct ProtocolOutput<I, O> {
     pub input: I,

@@ -257,8 +257,8 @@ impl Handler<ProtocolOutput<SignRequest, SignatureRecid>> for Coordinator
     type Result = ();
 
     fn handle(&mut self, msg: ProtocolOutput<SignRequest, SignatureRecid>, ctx: &mut Context<Self>) {
-        serde_json::to_string(&msg.output).context("serialize signature").map(
-            |signature|log::info!("signature {:?}", signature)
+        serde_json::to_string(&msg).context("serialize signature").map(
+            |serialized|log::info!("Sign request done {:?}", serialized)
         );
     }
 
