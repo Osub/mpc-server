@@ -67,17 +67,31 @@ impl Coordinator {
                 .await;
         }
     }
-    fn handle_incoming(&mut self,  msg: Result<IncomingEnvelope>,  ctx: &mut Context<Self>)->Result<()>{
-            let m = msg.context("Invalid IncomingEnvlope")?;
-
-            let addr = self.runners.get(&m.room).context("Not found room.")?;
-        let offlineMsg = serde_json::from_str::<Msg<OfflineProtocolMessage>>(&m.message).context("deserialize message")?;
-        addr.do_send(IncomingMessage {
-            room: m.room.clone(),
-            message: offlineMsg
-        });
-        Ok(())
+    fn handle_incoming(&mut self,  msg: IncomingEnvelope,  ctx: &mut Context<Self>){
+        let do_it : Result<()> = match self.runners.get(&msg.room).context("Not found room.") {
+            Ok(addr) => {
+                serde_json::from_str::<Msg<OfflineProtocolMessage>>(&msg.message).context("deserialize message").map(
+                    |offlineMsg| {
+                        addr.do_send(IncomingMessage {
+                            room: msg.room.clone(),
+                            message: offlineMsg
+                        });
+                    }
+                )
+            }
+            Err(_) => {
+                // TODO: Add timeout, i.e. give up retry after the timeout period
+                ctx.run_later(Duration::from_secs(1), |a, _ctx|{
+                    _ctx.notify(RetryEnvelope {
+                        room: msg.room,
+                        message: msg.message,
+                    });
+                });
+                Ok(())
+            }
+        };
     }
+
     fn send_one( envelope: OutgoingEnvelope)-> impl Future<Output=()> {
         async move {
             critical_section::<Self, _>(async {
@@ -172,6 +186,19 @@ impl StreamHandler<Result<IncomingEnvelope>> for Coordinator
 {
     fn handle(&mut self, msg: Result<IncomingEnvelope>, ctx: &mut Context<Self>) {
 
-        self.handle_incoming(msg, ctx);
+        match msg.context("Invalid IncomingEnvlope") {
+            Ok(msg) => {self.handle_incoming(msg, ctx);}
+            Err(_)=> {}
+        }
+
+    }
+}
+
+impl Handler<RetryEnvelope> for Coordinator
+{
+    type Result = ();
+
+    fn handle(&mut self, msg: RetryEnvelope, ctx: &mut Context<Self>) {
+        self.handle_incoming(IncomingEnvelope{ room: msg.room, message: msg.message}, ctx);
     }
 }

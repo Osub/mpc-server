@@ -39,6 +39,13 @@ pub struct Envelope {
 
 #[derive(Message, Serialize, Deserialize)]
 #[rtype(result = "()")]
+pub struct RetryEnvelope {
+    pub room: String,
+    pub message: String,
+}
+
+#[derive(Message, Serialize, Deserialize)]
+#[rtype(result = "()")]
 pub struct IncomingEnvelope {
     pub room: String,
     pub message: String,
