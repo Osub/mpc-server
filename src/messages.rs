@@ -30,6 +30,27 @@ pub struct SignRequest {
     pub local_key: LocalKey<Secp256k1>,
 }
 
+#[derive(Message, Serialize, Deserialize)]
+#[rtype(result = "()")]
+pub struct Envelope {
+    pub room: String,
+    pub message: String,
+}
+
+#[derive(Message, Serialize, Deserialize)]
+#[rtype(result = "()")]
+pub struct IncomingEnvelope {
+    pub room: String,
+    pub message: String,
+}
+
+#[derive(Message, Serialize, Deserialize)]
+#[rtype(result = "()")]
+pub struct OutgoingEnvelope {
+    pub room: String,
+    pub message: String,
+}
+
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct ProtocolMessage<M> {

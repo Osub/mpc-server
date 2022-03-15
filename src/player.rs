@@ -20,7 +20,7 @@ use actix_web::cookie::time::Month::May;
 use actix_web::error::ErrorNotFound;
 use futures::{Sink, SinkExt, StreamExt, TryStream};
 use tokio::time::{self};
-use crate::messages::{MaybeProceed, OutgoingMessage, ProtocolError, ProtocolMessage, ProtocolOutput};
+use crate::messages::{Envelope, IncomingMessage, MaybeProceed, OutgoingEnvelope, OutgoingMessage, ProtocolError, ProtocolMessage, ProtocolOutput};
 use round_based::{Msg, StateMachine};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -28,18 +28,20 @@ use anyhow::{Context as AnyhowContext, Error, Result};
 use futures::stream;
 use futures_util::TryStreamExt;
 
-pub struct MpcPlayer<SM, E: Send, M: Send, O: Send> {
+pub struct MpcPlayer<SM, E: Send, O: Send> {
+    room: String,
+    index: u16,
     msgCount: u16,
     initialPoller: Option<Box<SpawnHandle>>,
-    sink: Option<Pin<Box<dyn Sink<Msg<M>, Error = anyhow::Error>>>>,
     coordinator: Recipient<ProtocolError<E>>,
+    message_broker: Recipient<OutgoingEnvelope>,
     state: SM,
     deadline: Option<time::Instant>,
     current_round: Option<u16>,
     result_collector: Recipient<ProtocolOutput<O>>,
 }
 
-impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
+impl<SM> MpcPlayer<SM, SM::Err, SM::Output>
 where
     SM: StateMachine + Unpin,
     SM::Err: Send,
@@ -47,33 +49,29 @@ where
     SM::MessageBody: Send + Serialize,
     SM::Output: Send,
 {
-    pub fn new<Si, St>(
+    pub fn new(
+        room: String,
+        index: u16,
         state: SM,
-        sink: Si,
-        stream: St,
         coordinator: Recipient<ProtocolError<SM::Err>>,
-        result_collector: Recipient<ProtocolOutput<SM::Output>>
-    ) -> Addr<Self>
+        result_collector: Recipient<ProtocolOutput<SM::Output>>,
+        message_broker: Recipient<OutgoingEnvelope>,
+    ) -> Self
         where
             SM: StateMachine + Unpin,
-            Si: Sink<Msg<SM::MessageBody>, Error = anyhow::Error> + 'static,
-            St: Stream<Item = Result<Msg<SM::MessageBody>>> + 'static,
     {
-        let sink: Box<dyn Sink<Msg<SM::MessageBody>, Error = anyhow::Error>> = Box::new(sink);
-
-        Self::create(|ctx| {
-            ctx.add_stream(stream);
-            Self {
-                msgCount: 0,
-                sink: Some(sink.into()),
-                coordinator,
-                result_collector,
-                deadline: None,
-                current_round: None,
-                state,
-                initialPoller: None,
-            }
-        })
+        Self {
+            room,
+            index,
+            msgCount: 0,
+            coordinator,
+            result_collector,
+            deadline: None,
+            current_round: None,
+            state,
+            initialPoller: None,
+            message_broker
+        }
     }
     fn send_error(&mut self, error: SM::Err) {
         log::debug!("Sending error");
@@ -81,7 +79,7 @@ where
     }
 }
 
-impl<SM> Actor for MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
+impl<SM> Actor for MpcPlayer<SM, SM::Err, SM::Output>
     where
         SM: StateMachine + Unpin,
         SM::Err: Send,
@@ -109,7 +107,7 @@ impl<SM> Actor for MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
     // }
 }
 
-impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
+impl<SM> MpcPlayer<SM, SM::Err, SM::Output>
     where
         SM: StateMachine + Unpin,
         SM::Err: Send,
@@ -134,39 +132,22 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
 
     }
 
-    fn get_outgoing_stream(&mut self)-> Pin<Box<dyn TryStream<Item=Result<Msg<SM::MessageBody>>, Ok=Msg<SM::MessageBody>, Error=anyhow::Error>+'_>>{
-        Box::pin(futures::stream::iter(self.state.message_queue().drain(..)).map(Ok))
-    }
-    fn send_one( msg: Msg<SM::MessageBody>)-> impl Future<Output=()> {
-        log::debug!("Sending message {:?}", serde_json::to_string(&msg));
-        async move {
-            // Perform sends in a critical section so they are strictly ordered
-            critical_section::<Self, _>(async {
-                // Take the sink from the actor state
-                let mut sink = with_ctx(|actor: &mut Self, _| actor.sink.take())
-                    .expect("Sink to be present");
-
-                sink.send(msg).await;
-                // Send the request
-                // let res = sink.send(msg).await;
-
-                // Put the sink back, and if the send was successful,
-                // record the in-flight request.
-                with_ctx(|actor: &mut Self, _| {
-                    actor.sink = Some(sink);
-                });
-            })
-                .await;
-        }//.interop_actor(self)
-    }
     fn send_outgoing(&mut self, ctx: &mut Context<Self>){
+        if ! self.state.message_queue().is_empty(){
+            log::debug!("Message queue size is {}", self.state.message_queue().len());
+        }
 
-        log::debug!("Message queue size is {}", self.state.message_queue().len());
         for msg in self.state.message_queue().drain(..){
-            ctx.notify(OutgoingMessage {
-                message: msg,
-                room: "not-needed".to_owned(),
-            });
+            match serde_json::to_string(&msg) {
+                Ok(serialized) => {
+                    log::debug!("Sending message {:?}", serde_json::to_string(&msg));
+                    self.message_broker.do_send(OutgoingEnvelope {
+                        room: self.room.clone(),
+                        message: serialized,
+                    });
+                }
+                Err(_) => {}
+            }
         }
         // let f_s = stream::iter(self.state.message_queue().drain(..).map(Self::send_one));
         // ctx.add_stream(f_s);
@@ -176,60 +157,6 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
         // self.send_outgoing1(ctx).spawn(ctx);
     }
 
-    fn send_outgoing1(&mut self)-> FutureInteropWrap<Self, impl Future<Output=()>> {
-        // FutureInteropWrap<Self, impl Future<Output=Result<()>>>
-        // ->FutureInteropWrap<Self, Result<()>>
-        let msg = self.state.message_queue().drain(..).next().context("Not found.");
-        let m = msg.as_ref().expect("Msg");
-        log::debug!("Sending message {:?}", serde_json::to_string(&m));
-            async move {
-                // Perform sends in a critical section so they are strictly ordered
-                critical_section::<Self, _>(async {
-                    // Take the sink from the actor state
-                    let mut sink = with_ctx(|actor: &mut Self, _| actor.sink.take())
-                        .expect("Sink to be present");
-
-
-                    let res: Result<()> =  match msg {
-                        Ok(msg) => {
-                            let res0 = sink.send(msg).await;
-                            res0
-                        }
-                        Err(e) => Err(e)
-                    };
-
-                    // Send the request
-                    // let res = sink.send(msg).await;
-
-                    // Put the sink back, and if the send was successful,
-                    // record the in-flight request.
-                    with_ctx(|actor: &mut Self, _| {
-                        actor.sink = Some(sink);
-                    });
-                })
-                    .await;
-
-                // Wait for the result concurrently, so many requests can
-                // be pipelined at the same time.
-                // rx.await.expect("Sender should not be dropped"); // TODO: Check what is this doing and do we need it?
-            }.interop_actor(self)
-
-        // if !self.state.message_queue().is_empty() {
-        //     // let x = self.state.message_queue().drain(..).into_iter();
-        //     // let mut s: Iter<Item=Msg<SM::MessageBody>> =futures::stream::iter(
-        //     //     self.state.message_queue().drain(..).into_iter()
-        //     // );
-        //
-        //
-        //     actix::fut::wrap_future::<_,Self>({
-        //         let mut sink = with_ctx(|actor: &mut Self, _| actor.sink.take())
-        //             .expect("Sink to be present");
-        //         let mut msgs = with_ctx(|actor: &mut Self, _| actor.get_outgoing_stream());
-        //         sink.send_all(&mut msgs)
-        //
-        //     });
-        // }
-    }
     fn send_result(&mut self, result: SM::Output) {
         self.result_collector.do_send(ProtocolOutput{ output: result});
     }
@@ -270,7 +197,7 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
 }
 
 
-impl<SM> StreamHandler<Result<Msg<SM::MessageBody>>> for MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
+impl<SM> Handler<IncomingMessage<Msg<SM::MessageBody>>> for MpcPlayer<SM, SM::Err, SM::Output>
     where
         SM: StateMachine + Unpin,
         SM::Err: Send,
@@ -278,25 +205,22 @@ impl<SM> StreamHandler<Result<Msg<SM::MessageBody>>> for MpcPlayer<SM, SM::Err, 
         SM::MessageBody: Send + Serialize,
         SM::Output: Send,
 {
+    type Result = ();
 
-    fn handle(&mut self, msg: Result<Msg<SM::MessageBody>>, ctx: &mut Context<Self>) {
-        match msg {
-            Ok(m) => {
-                log::debug!("Round before: {}", self.state.current_round());
-                log::debug!("Received message {:?}", serde_json::to_string(&m));
-                self.msgCount += 1;
-                self.handle_incoming(m);
-                self.maybe_proceed(ctx);
-                log::debug!("Round after: {}", self.state.current_round());
-            }
-            Err(e) => {
-                // Ignore
-            }
+    fn handle(&mut self, msg: IncomingMessage<Msg<SM::MessageBody>>, ctx: &mut Context<Self>) {
+        if msg.message.sender == self.index{
+            return;
         }
+        log::debug!("Round before: {}", self.state.current_round());
+        log::debug!("Received message {:?}", serde_json::to_string(&msg.message));
+        self.msgCount += 1;
+        self.handle_incoming(msg.message);
+        self.maybe_proceed(ctx);
+        log::debug!("Round after: {}", self.state.current_round());
     }
 }
 
-impl<SM> Handler<MaybeProceed> for MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
+impl<SM> Handler<MaybeProceed> for MpcPlayer<SM, SM::Err, SM::Output>
     where
         SM: StateMachine + Unpin,
         SM::Err: Send,
@@ -316,20 +240,5 @@ impl<SM> Handler<MaybeProceed> for MpcPlayer<SM, SM::Err, SM::MessageBody, SM::O
         } else {
             log::debug!("Ignore proceed");
         }
-    }
-}
-
-impl<SM> Handler<OutgoingMessage<Msg<SM::MessageBody>>> for MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
-    where
-        SM: StateMachine + Unpin,
-        SM::Err: Send,
-        SM: Send + 'static,
-        SM::MessageBody: Send + Serialize,
-        SM::Output: Send,
-{
-    type Result = ();
-
-    fn handle(&mut self, msg: OutgoingMessage<Msg<SM::MessageBody>>, ctx: &mut Context<Self>) {
-        ctx.spawn(Self::send_one(msg.message).interop_actor(self));
     }
 }

@@ -21,10 +21,11 @@ use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::key
 use work_queue::{LocalQueue, Queue};
 use serde::{Serialize, Deserialize};
 use crate::coordinator::Coordinator;
-use crate::messages::SignRequest;
+use crate::messages::{IncomingEnvelope, SignRequest};
 use cli::Cli;
 use structopt::StructOpt;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use crate::transport::join_computation;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct SignPayload {
@@ -62,17 +63,21 @@ fn main() -> std::io::Result<()> {
     let i = args.index.clone();
     let local_share1 = local_share.clone();
     let s = async move {
-        let coordinator = Coordinator::new(args.messenger_address).start();
-
-        while let Some(r) = receiver.recv().await {
-            log::info!("Received request {:?}", r);
-            let result = coordinator.do_send(SignRequest {
-                room: "1234".to_string(),
-                i,
-                s_l: vec![1, 2],
-                local_key: local_share1.clone(),
-            });
-            log::info!("Result is {:?}", result);
+        match join_computation(args.messenger_address).await {
+            Ok((incoming, outgoing)) => {
+                let coordinator = Coordinator::new(incoming, outgoing);
+                while let Some(r) = receiver.recv().await {
+                    log::info!("Received request {:?}", r);
+                    let result = coordinator.do_send(SignRequest {
+                        room: "1234".to_string(),
+                        i,
+                        s_l: vec![1, 2],
+                        local_key: local_share1.clone(),
+                    });
+                    log::info!("Result is {:?}", result);
+                }
+            }
+            Err(_) => {}
         }
     };
 

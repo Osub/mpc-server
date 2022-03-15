@@ -14,14 +14,15 @@ use rocket::State;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Notify, RwLock};
 
-#[rocket::get("/rooms/<room_id>/subscribe")]
+static ROOM_ID: &str = "---default---";
+
+#[rocket::get("/subscribe")]
 async fn subscribe(
     db: &State<Db>,
     mut shutdown: rocket::Shutdown,
     last_seen_msg: LastEventId,
-    room_id: &str,
 ) -> EventStream<impl Stream<Item = Event>> {
-    let room = db.get_room_or_create_empty(room_id).await;
+    let room = db.get_room_or_create_empty(ROOM_ID).await;
     let mut subscription = room.subscribe(last_seen_msg.0);
     EventStream::from(stream! {
         loop {
@@ -36,17 +37,10 @@ async fn subscribe(
     })
 }
 
-#[rocket::post("/rooms/<room_id>/issue_unique_idx")]
-async fn issue_idx(db: &State<Db>, room_id: &str) -> Json<IssuedUniqueIdx> {
-    let room = db.get_room_or_create_empty(room_id).await;
-    let idx = room.issue_unique_idx();
-    Json::from(IssuedUniqueIdx { unique_idx: idx })
-}
-
-#[rocket::post("/rooms/<room_id>/broadcast", data = "<message>")]
-async fn broadcast(db: &State<Db>, room_id: &str, message: String) -> Status {
-    let room = db.get_room_or_create_empty(room_id).await;
-    println!("{:?}: {:?}", room_id, message);
+#[rocket::post("/broadcast", data = "<message>")]
+async fn broadcast(db: &State<Db>, message: String) -> Status {
+    let room = db.get_room_or_create_empty(ROOM_ID).await;
+    println!("Message: {:?}", message);
     room.publish(message).await;
     Status::Ok
 }
@@ -174,11 +168,6 @@ impl<'r> FromRequest<'r> for LastEventId {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct IssuedUniqueIdx {
-    unique_idx: u16,
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let figment = rocket::Config::figment().merge((
@@ -186,7 +175,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rocket::data::Limits::new().limit("string", 100.megabytes()),
     ));
     rocket::custom(figment)
-        .mount("/", rocket::routes![subscribe, issue_idx, broadcast])
+        .mount("/", rocket::routes![subscribe, broadcast])
         .manage(Db::empty())
         .launch()
         .await?;
