@@ -72,8 +72,7 @@ impl Coordinator {
 
             let addr = self.runners.get(&m.room).context("Not found room.")?;
         let offlineMsg = serde_json::from_str::<Msg<OfflineProtocolMessage>>(&m.message).context("deserialize message")?;
-        log::debug!("Received msg {:?}", offlineMsg);
-        addr.send(IncomingMessage {
+        addr.do_send(IncomingMessage {
             room: m.room.clone(),
             message: offlineMsg
         });
