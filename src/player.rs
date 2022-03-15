@@ -91,7 +91,7 @@ impl<SM> Actor for MpcPlayer<SM, SM::Err, SM::MessageBody, SM::Output>
 {
     type Context = Context<Self>;
     fn started(&mut self, ctx: &mut Self::Context) {
-        ctx.address().send(MaybeProceed{});
+        ctx.notify(MaybeProceed{});
     }
     // fn started(&mut self, ctx: &mut Self::Context) {
     //     let handle = ctx.run_interval(Duration::from_millis(250), | _actor, _ctx|{
