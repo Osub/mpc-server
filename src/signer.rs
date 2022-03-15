@@ -127,6 +127,9 @@ impl<I> Handler<IncomingMessage<Msg<PartialSignature>>> for Signer<I>
     type Result = ();
 
     fn handle(&mut self, msg: IncomingMessage<Msg<PartialSignature>>, ctx: &mut Context<Self>) {
+        if msg.message.sender == self.index {
+            return;
+        }
         self.partial_sigs.push(msg.message.body);
         self.finish_if_possible(ctx);
     }
