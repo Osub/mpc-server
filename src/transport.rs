@@ -10,8 +10,8 @@ use crate::messages::Envelope;
 pub async fn join_computation(
     url: surf::Url
 ) -> Result<(
-    impl Stream<Item = Result<Envelope>>,
-    impl Sink<Envelope, Error = anyhow::Error>,
+    impl Stream<Item=Result<Envelope>>,
+    impl Sink<Envelope, Error=anyhow::Error>,
 )>
 {
     let client = SmClient::new(url).context("construct SmClient")?;
@@ -24,16 +24,6 @@ pub async fn join_computation(
         .and_then(|msg| async move {
             serde_json::from_str::<Envelope>(&msg).context("deserialize message")
         });
-
-    // Obtain party index
-    // let index = client.issue_index().await.context("issue an index")?;
-
-    // Ignore incoming messages addressed to someone else
-    // let incoming = incoming.try_filter(move |msg| {
-    //     futures::future::ready(
-    //         msg.sender != index && (msg.receiver.is_none() || msg.receiver == Some(index)),
-    //     )
-    // });
 
     // Construct channel of outgoing messages
     let outgoing = futures::sink::unfold(client, |client, message: Envelope| async move {
@@ -71,7 +61,7 @@ impl SmClient {
         Ok(())
     }
 
-    pub async fn subscribe(&self) -> Result<impl Stream<Item = Result<String>>> {
+    pub async fn subscribe(&self) -> Result<impl Stream<Item=Result<String>>> {
         let response = self
             .http_client
             .get("subscribe")

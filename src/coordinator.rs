@@ -19,14 +19,14 @@ use futures_util::TryStreamExt;
 
 pub struct Coordinator {
     pub(crate) runners: HashMap<String, Addr<MpcPlayer<OfflineStage, <OfflineStage as StateMachine>::Err, <OfflineStage as StateMachine>::Output>>>,
-    sink: Option<Pin<Box<dyn Sink<Envelope, Error = anyhow::Error>>>>,
+    sink: Option<Pin<Box<dyn Sink<Envelope, Error=anyhow::Error>>>>,
 }
 
 impl Coordinator {
     pub fn new<Si, St>(stream: St, sink: Si) -> Addr<Self>
         where
-            St: Stream<Item = Result<Envelope>> + 'static,
-            Si: Sink<Envelope, Error = anyhow::Error> + 'static,
+            St: Stream<Item=Result<Envelope>> + 'static,
+            Si: Sink<Envelope, Error=anyhow::Error> + 'static,
     {
         let stream = stream.and_then(|msg| async move {
             Ok(IncomingEnvelope {
@@ -34,7 +34,7 @@ impl Coordinator {
                 message: msg.message,
             })
         });
-        let sink: Box<dyn Sink<Envelope, Error = anyhow::Error>> = Box::new(sink);
+        let sink: Box<dyn Sink<Envelope, Error=anyhow::Error>> = Box::new(sink);
 
         Self::create(|ctx| {
             ctx.add_stream(stream);
@@ -43,45 +43,22 @@ impl Coordinator {
                 sink: Some(sink.into()),
             }
         })
-
     }
-    fn forward_one( envelope: Envelope)-> impl Future<Output=()> {
-        async move {
-            critical_section::<Self, _>(async {
-
-                let mut sink = with_ctx(|actor: &mut Self, _| actor.sink.take())
-                    .expect("Sink to be present");
-
-                // Send the request
-                sink.send(Envelope{
-                    room: envelope.room,
-                    message: envelope.message
-                }).await;
-
-                // Put the sink back, and if the send was successful,
-                // record the in-flight request.
-                with_ctx(|actor: &mut Self, _| {
-                    actor.sink = Some(sink);
-                });
-            })
-                .await;
-        }
-    }
-    fn handle_incoming(&mut self,  msg: IncomingEnvelope,  ctx: &mut Context<Self>){
-        let do_it : Result<()> = match self.runners.get(&msg.room).context("Not found room.") {
+    fn handle_incoming(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) {
+        let _ = match self.runners.get(&msg.room).context("Not found room.") {
             Ok(addr) => {
                 serde_json::from_str::<Msg<OfflineProtocolMessage>>(&msg.message).context("deserialize message").map(
-                    |offlineMsg| {
+                    |offline_msg| {
                         addr.do_send(IncomingMessage {
                             room: msg.room.clone(),
-                            message: offlineMsg
+                            message: offline_msg,
                         });
                     }
                 )
             }
             Err(_) => {
                 // TODO: Add timeout, i.e. give up retry after the timeout period
-                ctx.run_later(Duration::from_secs(1), |a, _ctx|{
+                ctx.run_later(Duration::from_secs(1), |a, _ctx| {
                     _ctx.notify(RetryEnvelope {
                         room: msg.room,
                         message: msg.message,
@@ -92,17 +69,16 @@ impl Coordinator {
         };
     }
 
-    fn send_one( envelope: OutgoingEnvelope)-> impl Future<Output=()> {
+    fn send_one(envelope: OutgoingEnvelope) -> impl Future<Output=()> {
         async move {
             critical_section::<Self, _>(async {
-
                 let mut sink = with_ctx(|actor: &mut Self, _| actor.sink.take())
                     .expect("Sink to be present");
 
                 // Send the request
-                sink.send(Envelope{
+                sink.send(Envelope {
                     room: envelope.room,
-                    message: envelope.message
+                    message: envelope.message,
                 }).await;
 
                 // Put the sink back, and if the send was successful,
@@ -126,7 +102,7 @@ impl Handler<SignRequest> for Coordinator {
     fn handle(&mut self, req: SignRequest, ctx: &mut Context<Self>) -> Self::Result {
         log::info!("Received request {:?}", req);
 
-        let req0 = Arc::new(SignRequest{
+        let req0 = Arc::new(SignRequest {
             room: req.room.clone(),
             i: req.i.clone(),
             s_l: req.s_l.clone(),
@@ -150,17 +126,8 @@ impl Handler<SignRequest> for Coordinator {
 impl Handler<ProtocolError<<OfflineStage as StateMachine>::Err>> for Coordinator {
     type Result = ();
 
-    fn handle(&mut self, msg: ProtocolError<<OfflineStage as StateMachine>::Err>, ctx: &mut Context<Self>) {
+    fn handle(&mut self, msg: ProtocolError<<OfflineStage as StateMachine>::Err>, _: &mut Context<Self>) {
         log::info!("Error {:?}", msg.error);
-    }
-}
-
-impl Handler<OutgoingMessage<Msg<OfflineProtocolMessage>>> for Coordinator
-{
-    type Result = ();
-
-    fn handle(&mut self, msg: OutgoingMessage<Msg<OfflineProtocolMessage>>, ctx: &mut Context<Self>) {
-        log::info!("broadcast {:?}", msg.message);
     }
 }
 
@@ -185,12 +152,10 @@ impl Handler<ProtocolOutput<CompletedOfflineStage>> for Coordinator
 impl StreamHandler<Result<IncomingEnvelope>> for Coordinator
 {
     fn handle(&mut self, msg: Result<IncomingEnvelope>, ctx: &mut Context<Self>) {
-
         match msg.context("Invalid IncomingEnvlope") {
-            Ok(msg) => {self.handle_incoming(msg, ctx);}
-            Err(_)=> {}
+            Ok(msg) => { self.handle_incoming(msg, ctx); }
+            Err(_) => {}
         }
-
     }
 }
 
@@ -199,6 +164,6 @@ impl Handler<RetryEnvelope> for Coordinator
     type Result = ();
 
     fn handle(&mut self, msg: RetryEnvelope, ctx: &mut Context<Self>) {
-        self.handle_incoming(IncomingEnvelope{ room: msg.room, message: msg.message}, ctx);
+        self.handle_incoming(IncomingEnvelope { room: msg.room, message: msg.message }, ctx);
     }
 }
