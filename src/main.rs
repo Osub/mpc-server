@@ -1,3 +1,4 @@
+mod signer;
 mod player;
 mod coordinator;
 mod messages;
@@ -65,6 +66,7 @@ fn main() -> std::io::Result<()> {
                 while let Some(r) = receiver.recv().await {
                     log::info!("Received request {:?}", r);
                     let result = coordinator.do_send(SignRequest {
+                        message: r.message.clone(),
                         room: "1234".to_string(),
                         i,
                         s_l: vec![1, 2],

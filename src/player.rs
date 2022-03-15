@@ -15,7 +15,8 @@ use anyhow::{Context as AnyhowContext, Error, Result};
 use futures::stream;
 use futures_util::TryStreamExt;
 
-pub struct MpcPlayer<SM, E: Send, O: Send> {
+pub struct MpcPlayer<I: Send + Clone + Unpin + 'static, SM, E: Send, O: Send> {
+    input: I,
     room: String,
     index: u16,
     msg_count: u16,
@@ -25,11 +26,12 @@ pub struct MpcPlayer<SM, E: Send, O: Send> {
     state: SM,
     deadline: Option<time::Instant>,
     current_round: Option<u16>,
-    result_collector: Recipient<ProtocolOutput<O>>,
+    result_collector: Recipient<ProtocolOutput<I, O>>,
 }
 
-impl<SM> MpcPlayer<SM, SM::Err, SM::Output>
+impl<I, SM> MpcPlayer<I, SM, SM::Err, SM::Output>
     where
+        I: Send + Clone + Unpin + 'static,
         SM: StateMachine + Unpin,
         SM::Err: Send,
         SM: Send + 'static,
@@ -37,17 +39,19 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::Output>
         SM::Output: Send,
 {
     pub fn new(
+        input: I,
         room: String,
         index: u16,
         state: SM,
         coordinator: Recipient<ProtocolError<SM::Err>>,
-        result_collector: Recipient<ProtocolOutput<SM::Output>>,
+        result_collector: Recipient<ProtocolOutput<I, SM::Output>>,
         message_broker: Recipient<OutgoingEnvelope>,
     ) -> Self
         where
             SM: StateMachine + Unpin,
     {
         Self {
+            input,
             room,
             index,
             msg_count: 0,
@@ -66,8 +70,9 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::Output>
     }
 }
 
-impl<SM> Actor for MpcPlayer<SM, SM::Err, SM::Output>
+impl<I, SM> Actor for MpcPlayer<I, SM, SM::Err, SM::Output>
     where
+        I: Send + Clone + Unpin + 'static,
         SM: StateMachine + Unpin,
         SM::Err: Send,
         SM: Send + 'static,
@@ -80,8 +85,9 @@ impl<SM> Actor for MpcPlayer<SM, SM::Err, SM::Output>
     }
 }
 
-impl<SM> MpcPlayer<SM, SM::Err, SM::Output>
+impl<I, SM> MpcPlayer<I, SM, SM::Err, SM::Output>
     where
+        I: Send + Clone + Unpin + 'static,
         SM: StateMachine + Unpin,
         SM::Err: Send,
         SM: Send + 'static,
@@ -124,7 +130,7 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::Output>
     }
 
     fn send_result(&mut self, result: SM::Output) {
-        self.result_collector.do_send(ProtocolOutput { output: result });
+        self.result_collector.do_send(ProtocolOutput { input: self.input.clone(), output: result });
     }
     fn finish_if_possible(&mut self) {
         if self.state.is_finished() {
@@ -160,8 +166,9 @@ impl<SM> MpcPlayer<SM, SM::Err, SM::Output>
 }
 
 
-impl<SM> Handler<IncomingMessage<Msg<SM::MessageBody>>> for MpcPlayer<SM, SM::Err, SM::Output>
+impl<I, SM> Handler<IncomingMessage<Msg<SM::MessageBody>>> for MpcPlayer<I, SM, SM::Err, SM::Output>
     where
+        I: Send + Clone + Unpin + 'static,
         SM: StateMachine + Unpin,
         SM::Err: Send,
         SM: Send + 'static,
@@ -183,8 +190,9 @@ impl<SM> Handler<IncomingMessage<Msg<SM::MessageBody>>> for MpcPlayer<SM, SM::Er
     }
 }
 
-impl<SM> Handler<MaybeProceed> for MpcPlayer<SM, SM::Err, SM::Output>
+impl<I, SM> Handler<MaybeProceed> for MpcPlayer<I, SM, SM::Err, SM::Output>
     where
+        I: Send + Clone + Unpin + 'static,
         SM: StateMachine + Unpin,
         SM::Err: Send,
         SM: Send + 'static,

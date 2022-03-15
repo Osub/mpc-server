@@ -21,37 +21,38 @@ pub struct KeygenRequest {
     pub n: u16,
 }
 
-#[derive(Message, Debug)]
+#[derive(Message, Serialize, Deserialize, Clone, Debug)]
 #[rtype(result = "Result<()>")]
 pub struct SignRequest {
+    pub message: String,
     pub room: String,
     pub i: u16,
     pub s_l: Vec<u16>,
     pub local_key: LocalKey<Secp256k1>,
 }
 
-#[derive(Message, Serialize, Deserialize)]
+#[derive(Message, Serialize, Deserialize, Clone)]
 #[rtype(result = "()")]
 pub struct Envelope {
     pub room: String,
     pub message: String,
 }
 
-#[derive(Message, Serialize, Deserialize)]
+#[derive(Message, Serialize, Deserialize, Clone)]
 #[rtype(result = "()")]
 pub struct RetryEnvelope {
     pub room: String,
     pub message: String,
 }
 
-#[derive(Message, Serialize, Deserialize)]
+#[derive(Message, Serialize, Deserialize, Clone)]
 #[rtype(result = "()")]
 pub struct IncomingEnvelope {
     pub room: String,
     pub message: String,
 }
 
-#[derive(Message, Serialize, Deserialize)]
+#[derive(Message, Serialize, Deserialize, Clone)]
 #[rtype(result = "()")]
 pub struct OutgoingEnvelope {
     pub room: String,
@@ -94,6 +95,7 @@ pub struct ProtocolError<M> {
 
 #[derive(Message)]
 #[rtype(result = "()")]
-pub struct ProtocolOutput<M> {
-    pub output: M,
+pub struct ProtocolOutput<I, O> {
+    pub input: I,
+    pub output: O,
 }
