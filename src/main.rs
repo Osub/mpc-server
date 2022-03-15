@@ -53,11 +53,8 @@ fn main() -> std::io::Result<()> {
     let (sender, mut receiver) = unbounded_channel::<SignPayload>();
     let sys = actix::System::new();
 
-    // let c = Coordinator::new(args.messenger_address);
     let local_share = std::fs::read(args.local_share).unwrap();
     let local_share = serde_json::from_slice::<LocalKey<Secp256k1>>(&local_share).unwrap();
-    // let coordinator = SyncArbiter::start(1, || { c });
-    // let coordinator = c.start();
 
     let i = args.index.clone();
     let local_share1 = local_share.clone();
