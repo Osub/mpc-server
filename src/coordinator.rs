@@ -21,7 +21,7 @@ use futures_util::SinkExt;
 use surf::Url;
 use futures_util::TryStreamExt;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::SignatureRecid;
-use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{Keygen, Error as KeygenError};
+use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{Keygen, Error as KeygenError, ProtocolMessage as KeygenProtocolMessage};
 
 pub struct Coordinator {
     keygen_runners: HashMap<String, Addr<MpcPlayer<KeygenRequest, Keygen, <Keygen as StateMachine>::Err, <Keygen as StateMachine>::Output>>>,
@@ -54,6 +54,16 @@ impl Coordinator {
             }
         })
     }
+    fn handle_incoming_keygen(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) -> Result<()> {
+        let room = msg.room;
+        let addr = self.keygen_runners.get(&room).context("Not found mpc player.")?;
+        let msg = serde_json::from_str::<Msg<KeygenProtocolMessage>>(&msg.message).context("deserialize message")?;
+        addr.do_send(IncomingMessage {
+            room: room.clone(),
+            message: msg,
+        });
+        Ok(())
+    }
 
     fn handle_incoming_offline(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) -> Result<()> {
         let room = msg.room;
@@ -80,7 +90,8 @@ impl Coordinator {
     fn handle_incoming(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) {
         let h1= self.handle_incoming_offline(msg.clone(), ctx);
         let h2 = self.handle_incoming_sign(msg.clone(), ctx);
-        if h1.or(h2).is_err() {
+        let h3 = self.handle_incoming_keygen(msg.clone(), ctx);
+        if h1.or(h2).or(h3).is_err() {
             ctx.run_later(Duration::from_secs(1), move|a, _ctx| {
                 _ctx.notify(RetryEnvelope {
                     room: msg.room.clone(),
