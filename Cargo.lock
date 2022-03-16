@@ -1991,6 +1991,7 @@ dependencies = [
  "async-sse",
  "async-stream",
  "curv-kzen",
+ "either",
  "env_logger",
  "futures",
  "futures-util",

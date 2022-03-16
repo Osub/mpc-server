@@ -9,7 +9,7 @@ use actix::prelude::*;
 use actix_interop::{critical_section, FutureInterop, with_ctx};
 use crate::player::MpcPlayer;
 use crate::signer::Signer;
-use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{OfflineStage, CompletedOfflineStage, OfflineProtocolMessage, SignManual, PartialSignature};
+use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{OfflineStage, Error as OfflineStageError, CompletedOfflineStage, OfflineProtocolMessage, SignManual, PartialSignature};
 use round_based::{Msg, StateMachine};
 use crate::transport::join_computation;
 use anyhow::{Context as AnyhowContext, Error, Result};
@@ -21,8 +21,10 @@ use futures_util::SinkExt;
 use surf::Url;
 use futures_util::TryStreamExt;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::SignatureRecid;
+use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{Keygen, Error as KeygenError};
 
 pub struct Coordinator {
+    keygen_runners: HashMap<String, Addr<MpcPlayer<KeygenRequest, Keygen, <Keygen as StateMachine>::Err, <Keygen as StateMachine>::Output>>>,
     offline_state_runners: HashMap<String, Addr<MpcPlayer<SignRequest, OfflineStage, <OfflineStage as StateMachine>::Err, <OfflineStage as StateMachine>::Output>>>,
     signers: HashMap<String, Addr<Signer<SignRequest>>>,
     sink: Option<Pin<Box<dyn Sink<Envelope, Error=anyhow::Error>>>>,
@@ -45,6 +47,7 @@ impl Coordinator {
         Self::create(|ctx| {
             ctx.add_stream(stream);
             Self {
+                keygen_runners: HashMap::new(),
                 offline_state_runners: HashMap::new(),
                 signers: HashMap::new(),
                 sink: Some(sink.into()),
@@ -114,39 +117,62 @@ impl Actor for Coordinator {
     type Context = Context<Self>;
 }
 
+impl Handler<KeygenRequest> for Coordinator {
+    type Result = Result<()>;
+
+    fn handle(&mut self, req: KeygenRequest, ctx: &mut Context<Self>) -> Self::Result {
+        log::info!("Received request {:?}", req);
+
+        // let req0 = Arc::new(req.clone());
+
+        let state = Keygen::new(req.i, req.t, req.n).context("Create state machine")?;
+        let player = MpcPlayer::new(
+            req.clone(),
+            req.room.clone(),
+            req.i,
+            state,
+            ctx.address().recipient(),
+            ctx.address().recipient(),
+            ctx.address().recipient(),
+        ).start();
+        self.keygen_runners.insert(req.room.to_owned(), player);
+        Ok(())
+    }
+}
+
 impl Handler<SignRequest> for Coordinator {
     type Result = Result<()>;
 
     fn handle(&mut self, req: SignRequest, ctx: &mut Context<Self>) -> Self::Result {
         log::info!("Received request {:?}", req);
 
-        let req0 = Arc::new(SignRequest {
-            message: req.message.clone(),
-            room: req.room.clone(),
-            i: req.i.clone(),
-            s_l: req.s_l.clone(),
-            local_key: req.local_key.clone(),
-        });
-
-        let state = OfflineStage::new(req0.i, req0.s_l.clone(), req0.local_key.clone()).context("Create state machine")?;
+        let state = OfflineStage::new(req.i, req.s_l.clone(), req.local_key.clone()).context("Create state machine")?;
         let player = MpcPlayer::new(
             req.clone(),
-            req0.room.clone(),
-            req0.i,
+            req.room.clone(),
+            req.i,
             state,
             ctx.address().recipient(),
             ctx.address().recipient(),
             ctx.address().recipient(),
         ).start();
-        self.offline_state_runners.insert(req0.room.to_owned(), player);
+        self.offline_state_runners.insert(req.room.to_owned(), player);
         Ok(())
     }
 }
 
-impl Handler<ProtocolError<<OfflineStage as StateMachine>::Err>> for Coordinator {
+impl Handler<ProtocolError<KeygenError>> for Coordinator {
     type Result = ();
 
-    fn handle(&mut self, msg: ProtocolError<<OfflineStage as StateMachine>::Err>, _: &mut Context<Self>) {
+    fn handle(&mut self, msg: ProtocolError<KeygenError>, _: &mut Context<Self>) {
+        log::info!("Error {:?}", msg.error);
+    }
+}
+
+impl Handler<ProtocolError<OfflineStageError>> for Coordinator {
+    type Result = ();
+
+    fn handle(&mut self, msg: ProtocolError<OfflineStageError>, _: &mut Context<Self>) {
         log::info!("Error {:?}", msg.error);
     }
 }
@@ -158,6 +184,16 @@ impl Handler<OutgoingEnvelope> for Coordinator
     fn handle(&mut self, msg: OutgoingEnvelope, ctx: &mut Context<Self>) {
         ctx.spawn(Self::send_one(msg).interop_actor(self));
     }
+}
+
+impl Handler<ProtocolOutput<KeygenRequest, <Keygen as StateMachine>::Output>> for Coordinator
+{
+    type Result = ();
+
+    fn handle(&mut self, msg: ProtocolOutput<KeygenRequest, <Keygen as StateMachine>::Output>, ctx: &mut Context<Self>) {
+        log::info!("Public key is {:?}", msg.output.public_key());
+    }
+
 }
 
 impl Handler<ProtocolOutput<SignRequest, CompletedOfflineStage>> for Coordinator

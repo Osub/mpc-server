@@ -13,9 +13,10 @@ use anyhow::{Result};
 #[rtype(result = "()")]
 pub struct MaybeProceed;
 
-#[derive(Message)]
-#[rtype(result = "()")]
+#[derive(Message, Serialize, Deserialize, Clone, Debug)]
+#[rtype(result = "Result<()>")]
 pub struct KeygenRequest {
+    pub room: String,
     pub i: u16,
     pub t: u16,
     pub n: u16,
