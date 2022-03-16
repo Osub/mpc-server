@@ -112,42 +112,6 @@ impl Coordinator {
                 });
             });
         }
-        // let newMsg = msg.clone();
-        // let newMsg1 = msg.clone();
-        //     let msg = Rc::new(msg);
-        //     let offline_addr =  self.offline_state_runners.get(&msg.as_ref().room).context("Not found room.");
-        //     let signer_addr = self.signers.get(&msg.as_ref().room).context("Not found room.");
-        //     let offline_msg = serde_json::from_str::<Msg<OfflineProtocolMessage>>(&msg.as_ref().message).context("deserialize message");
-        //     let partial_sig_msg = serde_json::from_str::<Msg<PartialSignature>>(&msg.as_ref().message).context("deserialize message");
-        //     match (offline_addr, offline_msg) {
-        //         (Ok(addr), Ok(offline_msg)) => {
-        //             addr.do_send(IncomingMessage {
-        //                 room: msg.as_ref().room.clone(),
-        //                 message: offline_msg,
-        //             });
-        //         }
-        //         (Err(e), _)=> {
-        //             self.retry_later(newMsg.clone(), ctx);
-        //         }
-        //         (_, Err(_)) => {
-        //             // Ignore invalid message
-        //         }
-        //     };
-        //
-        //     match (signer_addr, partial_sig_msg) {
-        //         (Ok(addr), Ok(partial_sig)) => {
-        //             addr.do_send(IncomingMessage {
-        //                 room: msg.room.clone(),
-        //                 message: partial_sig,
-        //             });
-        //         }
-        //         (Err(e), Ok(_)) => {
-        //             self.retry_later(newMsg1.clone(), ctx);
-        //         }
-        //         (_, Err(_)) => {
-        //             // Ignore invalid message
-        //         }
-        //     };
     }
 
     fn send_one(envelope: OutgoingEnvelope) -> impl Future<Output=()> {
