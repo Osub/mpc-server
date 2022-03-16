@@ -51,60 +51,33 @@ impl Coordinator {
             }
         })
     }
-    fn retry_later(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) {
-        ctx.run_later(Duration::from_secs(1), move|a, _ctx| {
-            _ctx.notify(RetryEnvelope {
-                room: msg.room.clone(),
-                message: msg.message.clone(),
-            });
+
+    fn handle_incoming_offline(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) -> Result<()> {
+        let room = msg.room;
+        let addr = self.offline_state_runners.get(&room).context("Not found mpc player.")?;
+        let msg = serde_json::from_str::<Msg<OfflineProtocolMessage>>(&msg.message).context("deserialize message")?;
+        addr.do_send(IncomingMessage {
+            room: room.clone(),
+            message: msg,
         });
+        Ok(())
     }
-    fn handle_incoming_offline(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) ->bool {
+
+    fn handle_incoming_sign(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) -> Result<()> {
         let room = msg.room;
-        match self.offline_state_runners.get(&room).context("Not found room.") {
-            Ok(addr)=> {
-                let msg = serde_json::from_str::<Msg<OfflineProtocolMessage>>(&msg.message).context("deserialize message");
-                match msg {
-                    Ok(msg)=> {
-                        addr.do_send(IncomingMessage {
-                            room: room.clone(),
-                            message: msg,
-                        });
-                        true
-                    }
-                    Err(_) => {
-                        false
-                    }
-                }
-            }
-            Err(_) => {false}
-        }
+        let addr = self.signers.get(&room).context("Not found signer.")?;
+        let msg = serde_json::from_str::<Msg<PartialSignature>>(&msg.message).context("deserialize message")?;
+        addr.do_send(IncomingMessage {
+            room: room.clone(),
+            message: msg,
+        });
+        Ok(())
     }
-    fn handle_incoming_sign(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) ->bool {
-        let room = msg.room;
-        match self.signers.get(&room).context("Not found room.") {
-            Ok(addr)=> {
-                let msg = serde_json::from_str::<Msg<PartialSignature>>(&msg.message).context("deserialize message");
-                match msg {
-                    Ok(msg)=> {
-                        addr.do_send(IncomingMessage {
-                            room: room.clone(),
-                            message: msg,
-                        });
-                        true
-                    }
-                    Err(_) => {
-                        false
-                    }
-                }
-            }
-            Err(_) => {false}
-        }
-    }
+
     fn handle_incoming(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) {
         let h1= self.handle_incoming_offline(msg.clone(), ctx);
         let h2 = self.handle_incoming_sign(msg.clone(), ctx);
-        if !(h1 || h2) {
+        if h1.or(h2).is_err() {
             ctx.run_later(Duration::from_secs(1), move|a, _ctx| {
                 _ctx.notify(RetryEnvelope {
                     room: msg.room.clone(),
