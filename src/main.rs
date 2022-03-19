@@ -69,10 +69,10 @@ async fn sign(data: web::Data<AppState>, req: web::Json<SignPayload>) -> impl Re
 }
 
 fn get_secret_key(path: PathBuf) -> Result<SecretKey> {
-    let sk_hex = std::fs::read_to_string(path)?;
-    let sk_bytes = hex::decode(sk_hex)?;
+    let sk_hex = std::fs::read_to_string(path).context("Read secret key file.")?;
+    let sk_bytes = hex::decode(sk_hex).context("Decode hex secret key.")?;
 
-    let sk = SecretKey::parse_slice(&sk_bytes)?;
+    let sk = SecretKey::parse_slice(sk_bytes.as_slice()).context("Parse secret key.")?;
     Ok(sk)
 }
 
