@@ -12,6 +12,8 @@ pub struct Cli {
     #[structopt(short, long)]
     pub local_share: PathBuf,
 
+    #[structopt(short, long)]
+    pub secret_key_path: PathBuf,
 
     #[structopt(short, long)]
     pub index: u16,

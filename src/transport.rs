@@ -1,19 +1,81 @@
 use std::convert::TryInto;
+use std::ops::Deref;
 use anyhow::{Context, Result};
+use curv::elliptic::curves::ECScalar;
+use curv::elliptic::curves::secp256_k1::Secp256k1Scalar;
+// use curv::elliptic::curves::Scalar;
 use futures::{Sink, Stream, StreamExt, TryStreamExt};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize, Serializer};
 use structopt::StructOpt;
 
 use round_based::Msg;
-use crate::messages::Envelope;
+use crate::messages::{EcdsaSignature, Envelope, SignedEnvelope};
+use secp256k1::{SecretKey, Message, sign, verify, PublicKey, Signature};
+use secp256k1::curve::Scalar;
+use serde::ser::SerializeStruct;
+use sha2::{Digest, Sha256};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+enum VerifyError {
+    #[error("Verification failed.")]
+    Failed,
+}
+
+fn parse_signed(msg: String)->Result<SignedEnvelope<String>> {
+    let signed = serde_json::from_str::<SignedEnvelope<String>>(&msg).context("deserialize message")?;
+    let send_pk_str = signed.sender_public_key.clone();
+    let bytes = hex::decode(send_pk_str).context("Wrong pub key")?;
+
+    let sender_pub = PublicKey::parse_slice(bytes.as_slice(), None).context("Failed to parse pub key")?;
+    let sbytes = hex::decode(signed.signature.clone()).context("Wrong signature")?;
+    let sig = Signature::parse_slice(sbytes.as_slice())?;
+
+    let mut hasher = Sha256::new();
+    hasher.update(signed.message.as_bytes());
+    let hash = hasher.finalize();
+    let hbytes = hash.as_slice().try_into().context("Create hash")?;
+    let message = Message::parse(hbytes);
+    let verified = verify(&message, &sig, &sender_pub);
+    let out = if verified {
+        Ok(signed)
+    } else {
+        Err(VerifyError::Failed)
+    }?;
+    Ok(out)
+}
+
+fn sign_envelope(key: &SecretKey, pub_key: &String, envelope: Envelope) -> Result<SignedEnvelope<String>> {
+    let mut hasher = Sha256::new();
+    hasher.update(envelope.message.as_bytes());
+    let hash = hasher.finalize();
+    let hbytes = hash.as_slice().try_into().context("Create hash")?;
+    let message = Message::parse(hbytes);
+    let (sig, recid) = sign(&message, key);
+    // let sig_serialized = serde_json::to_string( &sig).context("serialize signature")?;
+    // let r = hex::encode(sig.r.b32());
+    // let s = hex::encode(sig.s.b32());
+    let signature = hex::encode(sig.serialize());
+    let signed = SignedEnvelope {
+        room: envelope.room,
+        message: envelope.message,
+        sender_public_key: pub_key.clone(),
+        signature,
+    };
+    Ok(signed)
+}
 
 pub async fn join_computation(
-    url: surf::Url
+    url: surf::Url,
+    key: SecretKey,
 ) -> Result<(
-    impl Stream<Item=Result<Envelope>>,
+    impl Stream<Item=Result<SignedEnvelope<String>>>,
     impl Sink<Envelope, Error=anyhow::Error>,
 )>
 {
+    let key = Box::new(key);
+    let pub_key = PublicKey::from_secret_key(&key);
+    let pub_key = Box::new(hex::encode(pub_key.serialize_compressed()));
     let client = SmClient::new(url).context("construct SmClient")?;
 
     // Construct channel of incoming messages
@@ -21,18 +83,58 @@ pub async fn join_computation(
         .subscribe()
         .await
         .context("subscribe")?
-        .and_then(|msg| async move {
-            serde_json::from_str::<Envelope>(&msg).context("deserialize message")
+        .filter_map(|msg| async move {
+            match msg {
+                Ok(msg) => {Some(parse_signed(msg))}
+                Err(_) => {None}
+            }
+            // let msg = msg.context("Invalid msg").ok()?;
+            // let signed = serde_json::from_str::<SignedEnvelope<String>>(&msg).context("deserialize message").ok()?;
+            // let send_pk_str = signed.sender_public_key.clone();
+            // let bytes = hex::decode(send_pk_str).context("Wrong pub key").ok()?;
+            //
+            // let sender_pub = PublicKey::parse_slice(bytes.as_slice(), None).context("Failed to parse pub key").ok()?;
+            // let sbytes = hex::decode(signed.signature).context("Wrong signature").ok()?;
+            // let sig = Signature::parse_slice(sbytes.as_slice()).ok()?;
+            //
+            // let mut hasher = Sha256::new();
+            // hasher.update(signed.message.as_bytes());
+            // let hbytes = hasher.finalize().as_slice().try_into().context("Create hash").ok()?;
+            // let message = Message::parse(hbytes);
+            // let verified = verify(&message, &sig, &sender_pub);
+            // if verified {
+            //     Some(signed)
+            // } else {
+            //     None
+            // }
         });
 
     // Construct channel of outgoing messages
-    let outgoing = futures::sink::unfold(client, |client, message: Envelope| async move {
-        let serialized = serde_json::to_string(&message)?;
+    let outgoing = futures::sink::unfold((client, key, pub_key), |(client, key, pub_key), unsigned: Envelope| async move {
+        // let mut hasher = Sha256::new();
+        // hasher.update(unsigned.message.as_bytes());
+        // let hbytes = hasher.finalize().as_slice().try_into().context("Create hash")?;
+        // let message = Message::parse(hbytes);
+        // let (sig, recid) = sign(&message, &key);
+        // // let sig_serialized = serde_json::to_string( &sig).context("serialize signature")?;
+        // // let r = hex::encode(sig.r.b32());
+        // // let s = hex::encode(sig.s.b32());
+        // let signature = hex::encode(sig.serialize());
+        // let signed = SignedEnvelope {
+        //     room: unsigned.room,
+        //     message: unsigned.message,
+        //     sender_public_key: pub_key.clone(),
+        //     signature,
+        // };
+        // let key = key.clone();
+        // let pub_key = pub_key.clone();
+        let signed = sign_envelope(key.as_ref(), pub_key.as_ref(), unsigned).context("Failed to sign")?;
+        let serialized = serde_json::to_string(&signed)?;
         client
             .broadcast(&serialized)
             .await
             .context("broadcast message")?;
-        Ok::<_, anyhow::Error>(client)
+        Ok::<_, anyhow::Error>((client, key, pub_key))
     });
 
     Ok((incoming, outgoing))

@@ -41,6 +41,22 @@ pub struct Envelope {
 
 #[derive(Message, Serialize, Deserialize, Clone)]
 #[rtype(result = "()")]
+pub struct EcdsaSignature {
+    pub r: String,
+    pub s: String,
+}
+
+#[derive(Message, Serialize, Deserialize, Clone)]
+#[rtype(result = "()")]
+pub struct SignedEnvelope<S> {
+    pub room: String,
+    pub message: String,
+    pub sender_public_key: String,
+    pub signature: S,
+}
+
+#[derive(Message, Serialize, Deserialize, Clone)]
+#[rtype(result = "()")]
 pub struct RetryEnvelope {
     pub room: String,
     pub message: String,

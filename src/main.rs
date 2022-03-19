@@ -14,11 +14,13 @@ use std::borrow::Borrow;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::{thread, time};
+use std::path::PathBuf;
 use actix::prelude::*;
 use actix_web::{get, web, http, middleware, App, HttpServer, Responder, HttpRequest, HttpResponse, Error};
 use curv::elliptic::curves::Secp256k1;
 use either::Either;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::LocalKey;
+use secp256k1::SecretKey;
 use work_queue::{LocalQueue, Queue};
 use serde::{Serialize, Deserialize};
 use crate::coordinator::Coordinator;
@@ -27,6 +29,7 @@ use cli::Cli;
 use structopt::StructOpt;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use crate::transport::join_computation;
+use anyhow::{Context, Result};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct SignPayload {
@@ -65,20 +68,28 @@ async fn sign(data: web::Data<AppState>, req: web::Json<SignPayload>) -> impl Re
     format!("Hi there!")
 }
 
+fn get_secret_key(path: PathBuf) -> Result<SecretKey> {
+    let sk_hex = std::fs::read_to_string(path)?;
+    let sk_bytes = hex::decode(sk_hex)?;
+
+    let sk = SecretKey::parse_slice(&sk_bytes)?;
+    Ok(sk)
+}
+
 fn main() -> std::io::Result<()> {
     ::std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
     let args: Cli = Cli::from_args();
     let (tx, mut rx) = unbounded_channel::<Payload>();
     let sys = actix::System::new();
-
+    let sk = get_secret_key(args.secret_key_path.clone()).context("Can't find secret key path.").unwrap();
     let local_share = std::fs::read(args.local_share).unwrap();
     let local_share = serde_json::from_slice::<LocalKey<Secp256k1>>(&local_share).unwrap();
 
     let i = args.index.clone();
     let local_share1 = local_share.clone();
     let s = async move {
-        match join_computation(args.messenger_address).await {
+        match join_computation(args.messenger_address, sk).await {
             Ok((incoming, outgoing)) => {
                 let coordinator = Coordinator::new(incoming, outgoing);
                 while let Some(payload) = rx.recv().await {

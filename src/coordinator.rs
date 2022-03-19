@@ -33,7 +33,7 @@ pub struct Coordinator {
 impl Coordinator {
     pub fn new<Si, St>(stream: St, sink: Si) -> Addr<Self>
         where
-            St: Stream<Item=Result<Envelope>> + 'static,
+            St: Stream<Item=Result<SignedEnvelope<String>>> + 'static,
             Si: Sink<Envelope, Error=anyhow::Error> + 'static,
     {
         let stream = stream.and_then(|msg| async move {
