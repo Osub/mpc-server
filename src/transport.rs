@@ -1,9 +1,6 @@
 use std::convert::TryInto;
 use std::ops::Deref;
 use anyhow::{Context, Result};
-use curv::elliptic::curves::ECScalar;
-use curv::elliptic::curves::secp256_k1::Secp256k1Scalar;
-// use curv::elliptic::curves::Scalar;
 use futures::{Sink, Stream, StreamExt, TryStreamExt};
 use serde::{de::DeserializeOwned, Deserialize, Serialize, Serializer};
 use structopt::StructOpt;
