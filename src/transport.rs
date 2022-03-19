@@ -52,9 +52,6 @@ fn sign_envelope(key: &SecretKey, pub_key: &String, envelope: Envelope) -> Resul
     let hbytes = hash.as_slice().try_into().context("Create hash")?;
     let message = Message::parse(hbytes);
     let (sig, recid) = sign(&message, key);
-    // let sig_serialized = serde_json::to_string( &sig).context("serialize signature")?;
-    // let r = hex::encode(sig.r.b32());
-    // let s = hex::encode(sig.s.b32());
     let signature = hex::encode(sig.serialize());
     let signed = SignedEnvelope {
         room: envelope.room,
@@ -88,46 +85,10 @@ pub async fn join_computation(
                 Ok(msg) => {Some(parse_signed(msg))}
                 Err(_) => {None}
             }
-            // let msg = msg.context("Invalid msg").ok()?;
-            // let signed = serde_json::from_str::<SignedEnvelope<String>>(&msg).context("deserialize message").ok()?;
-            // let send_pk_str = signed.sender_public_key.clone();
-            // let bytes = hex::decode(send_pk_str).context("Wrong pub key").ok()?;
-            //
-            // let sender_pub = PublicKey::parse_slice(bytes.as_slice(), None).context("Failed to parse pub key").ok()?;
-            // let sbytes = hex::decode(signed.signature).context("Wrong signature").ok()?;
-            // let sig = Signature::parse_slice(sbytes.as_slice()).ok()?;
-            //
-            // let mut hasher = Sha256::new();
-            // hasher.update(signed.message.as_bytes());
-            // let hbytes = hasher.finalize().as_slice().try_into().context("Create hash").ok()?;
-            // let message = Message::parse(hbytes);
-            // let verified = verify(&message, &sig, &sender_pub);
-            // if verified {
-            //     Some(signed)
-            // } else {
-            //     None
-            // }
         });
 
     // Construct channel of outgoing messages
     let outgoing = futures::sink::unfold((client, key, pub_key), |(client, key, pub_key), unsigned: Envelope| async move {
-        // let mut hasher = Sha256::new();
-        // hasher.update(unsigned.message.as_bytes());
-        // let hbytes = hasher.finalize().as_slice().try_into().context("Create hash")?;
-        // let message = Message::parse(hbytes);
-        // let (sig, recid) = sign(&message, &key);
-        // // let sig_serialized = serde_json::to_string( &sig).context("serialize signature")?;
-        // // let r = hex::encode(sig.r.b32());
-        // // let s = hex::encode(sig.s.b32());
-        // let signature = hex::encode(sig.serialize());
-        // let signed = SignedEnvelope {
-        //     room: unsigned.room,
-        //     message: unsigned.message,
-        //     sender_public_key: pub_key.clone(),
-        //     signature,
-        // };
-        // let key = key.clone();
-        // let pub_key = pub_key.clone();
         let signed = sign_envelope(key.as_ref(), pub_key.as_ref(), unsigned).context("Failed to sign")?;
         let serialized = serde_json::to_string(&signed)?;
         client
