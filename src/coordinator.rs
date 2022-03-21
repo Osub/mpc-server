@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::future::Future;
+use std::ops::Deref;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -15,16 +16,18 @@ use crate::transport::join_computation;
 use anyhow::{Context as AnyhowContext, Error, Result};
 use curv::arithmetic::Converter;
 use curv::BigInt;
+use curv::elliptic::curves::Secp256k1;
 use serde_json::ser::State;
 use futures::{future, Sink};
 use futures_util::SinkExt;
 use surf::Url;
 use futures_util::TryStreamExt;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::SignatureRecid;
-use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{Keygen, Error as KeygenError, ProtocolMessage as KeygenProtocolMessage};
+use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{Keygen, Error as KeygenError, ProtocolMessage as KeygenProtocolMessage, LocalKey};
 use crate::group::{MpcGroup, PublicKeyGroup};
 use thiserror::Error;
 use crate::coordinator::GroupError::WrongPublicKey;
+use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Error)]
 enum GroupError {
@@ -32,7 +35,15 @@ enum GroupError {
     WrongPublicKey,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct StoredLocalShare {
+    public_keys: Vec<String>,
+    own_public_key: String,
+    share: LocalKey<Secp256k1>,
+}
+
 pub struct Coordinator {
+    db : sled::Db,
     groups: HashMap<String, PublicKeyGroup>,
     keygen_runners: HashMap<String, Addr<MpcPlayer<KeygenRequest, Keygen, <Keygen as StateMachine>::Err, <Keygen as StateMachine>::Output>>>,
     offline_state_runners: HashMap<String, Addr<MpcPlayer<SignRequest, OfflineStage, <OfflineStage as StateMachine>::Err, <OfflineStage as StateMachine>::Output>>>,
@@ -41,7 +52,7 @@ pub struct Coordinator {
 }
 
 impl Coordinator {
-    pub fn new<Si, St>(stream: St, sink: Si) -> Addr<Self>
+    pub fn new<Si, St>(db:sled::Db, stream: St, sink: Si) -> Addr<Self>
         where
             St: Stream<Item=Result<SignedEnvelope<String>>> + 'static,
             Si: Sink<Envelope, Error=anyhow::Error> + 'static,
@@ -58,6 +69,7 @@ impl Coordinator {
         Self::create(|ctx| {
             ctx.add_stream(stream);
             Self {
+                db,
                 groups: HashMap::new(),
                 keygen_runners: HashMap::new(),
                 offline_state_runners: HashMap::new(),
@@ -152,6 +164,19 @@ impl Coordinator {
                 .await;
         }
     }
+    fn save_local_share(&mut self, local_share: StoredLocalShare) -> Result<()> {
+        let out = serde_json::to_vec_pretty(&local_share).context("serialize local share")?;
+        let sum_pk_bytes = local_share.share.public_key().to_bytes(true);
+        let sum_pk = hex::encode(sum_pk_bytes.deref());
+        let ov: Option<&[u8]> = None;
+        let nv: Option<&[u8]> = Some(out.as_slice()); // TODO: Encrypt payload
+        self.db.compare_and_swap(
+            sum_pk.as_bytes(),      // key
+            ov, // old value, None for not present
+            nv, // new value, None for delete
+        ).context("Save to db.")?;
+        Ok(())
+    }
 }
 
 impl Actor for Coordinator {
@@ -229,12 +254,24 @@ impl Handler<OutgoingEnvelope> for Coordinator
     }
 }
 
-impl Handler<ProtocolOutput<KeygenRequest, <Keygen as StateMachine>::Output>> for Coordinator
+impl Handler<ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>> for Coordinator
 {
     type Result = ();
 
-    fn handle(&mut self, msg: ProtocolOutput<KeygenRequest, <Keygen as StateMachine>::Output>, ctx: &mut Context<Self>) {
+    fn handle(&mut self, msg: ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>, ctx: &mut Context<Self>) {
         log::info!("Public key is {:?}", msg.output.public_key());
+        let share = msg.output.clone();
+        let saved = self.save_local_share(StoredLocalShare{
+            public_keys: msg.input.public_keys,
+            own_public_key: msg.input.own_public_key,
+            share: msg.output
+        });
+        match saved {
+            Ok(())=> {
+                log::debug!("Saved local share: {:?}", share);
+            }
+            Err(e) => {log::error!("Failed to save local share: {}", e);}
+        }
     }
 
 }

@@ -16,5 +16,8 @@ pub struct Cli {
     pub secret_key_path: PathBuf,
 
     #[structopt(short, long)]
+    pub db_path: PathBuf,
+
+    #[structopt(short, long)]
     pub index: u16,
 }

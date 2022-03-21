@@ -87,12 +87,13 @@ fn main() -> std::io::Result<()> {
     let own_public_key = hex::encode(pk.serialize_compressed());
     let local_share = std::fs::read(args.local_share).unwrap();
     let local_share = serde_json::from_slice::<LocalKey<Secp256k1>>(&local_share).unwrap();
+    let db: sled::Db = sled::open(args.db_path).unwrap();
     let i = args.index.clone();
     let local_share1 = local_share.clone();
     let s = async move {
         match join_computation(args.messenger_address, sk).await {
             Ok((incoming, outgoing)) => {
-                let coordinator = Coordinator::new(incoming, outgoing);
+                let coordinator = Coordinator::new(db,incoming, outgoing);
                 while let Some(payload) = rx.recv().await {
                     log::info!("Received request {:?}", payload);
                     match payload {
