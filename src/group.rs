@@ -41,7 +41,7 @@ impl PublicKeyGroup {
     }
 
     pub fn get_index(&self, public_key: &String) -> Option<usize> {
-        self.public_keys.iter().position(|pk| *pk == *public_key)
+        self.public_keys.iter().position(|pk| *pk == *public_key).map(|i| i + 1)
     }
 
 }
@@ -53,7 +53,7 @@ impl MpcGroup for PublicKeyGroup {
     }
 
     fn get_i(&self) -> u16 {
-        self.public_keys.iter().position(|pk| *pk == self.own_public_key).unwrap() as u16
+        self.get_index(&self.own_public_key).unwrap() as u16
     }
 
     fn get_t(&self) -> u16 {
