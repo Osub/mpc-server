@@ -16,10 +16,9 @@ pub struct MaybeProceed;
 #[derive(Message, Serialize, Deserialize, Clone, Debug)]
 #[rtype(result = "Result<()>")]
 pub struct KeygenRequest {
-    pub room: String,
-    pub i: u16,
+    pub public_keys: Vec<String>,
     pub t: u16,
-    pub n: u16,
+    pub own_public_key: String,
 }
 
 #[derive(Message, Serialize, Deserialize, Clone, Debug)]
@@ -60,6 +59,7 @@ pub struct SignedEnvelope<S> {
 pub struct RetryEnvelope {
     pub room: String,
     pub message: String,
+    pub sender_public_key: String,
 }
 
 #[derive(Message, Serialize, Deserialize, Clone)]
@@ -67,6 +67,7 @@ pub struct RetryEnvelope {
 pub struct IncomingEnvelope {
     pub room: String,
     pub message: String,
+    pub sender_public_key: String,
 }
 
 #[derive(Message, Serialize, Deserialize, Clone)]

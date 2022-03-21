@@ -4,6 +4,7 @@ mod coordinator;
 mod messages;
 mod cli;
 mod transport;
+mod group;
 
 extern crate env_logger;
 
@@ -20,7 +21,7 @@ use actix_web::{get, web, http, middleware, App, HttpServer, Responder, HttpRequ
 use curv::elliptic::curves::Secp256k1;
 use either::Either;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::LocalKey;
-use secp256k1::SecretKey;
+use secp256k1::{PublicKey, SecretKey};
 use work_queue::{LocalQueue, Queue};
 use serde::{Serialize, Deserialize};
 use crate::coordinator::Coordinator;
@@ -38,9 +39,8 @@ struct SignPayload {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct KeygenPayload {
-    i: u16,
+    public_keys: Vec<String>,
     t: u16,
-    n: u16,
 }
 
 type Payload = Either<KeygenPayload, SignPayload>;
@@ -68,12 +68,13 @@ async fn sign(data: web::Data<AppState>, req: web::Json<SignPayload>) -> impl Re
     format!("Hi there!")
 }
 
-fn get_secret_key(path: PathBuf) -> Result<SecretKey> {
+fn get_secret_key(path: PathBuf) -> Result<(SecretKey, PublicKey)> {
     let sk_hex = std::fs::read_to_string(path).context("Read secret key file.")?;
     let sk_bytes = hex::decode(sk_hex).context("Decode hex secret key.")?;
 
     let sk = SecretKey::parse_slice(sk_bytes.as_slice()).context("Parse secret key.")?;
-    Ok(sk)
+    let pk = PublicKey::from_secret_key(&sk);
+    Ok((sk, pk))
 }
 
 fn main() -> std::io::Result<()> {
@@ -82,10 +83,10 @@ fn main() -> std::io::Result<()> {
     let args: Cli = Cli::from_args();
     let (tx, mut rx) = unbounded_channel::<Payload>();
     let sys = actix::System::new();
-    let sk = get_secret_key(args.secret_key_path.clone()).context("Can't find secret key path.").unwrap();
+    let (sk, pk) = get_secret_key(args.secret_key_path.clone()).context("Can't find secret key path.").unwrap();
+    let own_public_key = hex::encode(pk.serialize_compressed());
     let local_share = std::fs::read(args.local_share).unwrap();
     let local_share = serde_json::from_slice::<LocalKey<Secp256k1>>(&local_share).unwrap();
-
     let i = args.index.clone();
     let local_share1 = local_share.clone();
     let s = async move {
@@ -95,10 +96,10 @@ fn main() -> std::io::Result<()> {
                 while let Some(payload) = rx.recv().await {
                     log::info!("Received request {:?}", payload);
                     match payload {
-                         Either::Left(KeygenPayload{i, t, n}) => {
+                         Either::Left(KeygenPayload{public_keys, t}) => {
                              let result = coordinator.do_send(KeygenRequest {
-                                 room: "2345".to_string(),
-                                 i, t, n
+                                 public_keys, t,
+                                 own_public_key: own_public_key.clone()
                              });
                         }
                         Either::Right(SignPayload{message}) => {
