@@ -259,7 +259,9 @@ impl Handler<ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>> for Coordinator
     type Result = ();
 
     fn handle(&mut self, msg: ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>, ctx: &mut Context<Self>) {
-        log::info!("Public key is {:?}", msg.output.public_key());
+        let sum_pk_bytes = msg.output.public_key().to_bytes(true);
+        let sum_pk = hex::encode(sum_pk_bytes.deref());
+        log::info!("Public key is {:?}", sum_pk);
         let share = msg.output.clone();
         let saved = self.save_local_share(StoredLocalShare{
             public_keys: msg.input.public_keys,
