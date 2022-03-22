@@ -24,11 +24,18 @@ pub struct KeygenRequest {
 #[derive(Message, Serialize, Deserialize, Clone, Debug)]
 #[rtype(result = "Result<()>")]
 pub struct SignRequest {
+    pub public_key: String,
+    pub participant_public_keys: Vec<String>,
     pub message: String,
-    pub room: String,
+    pub own_public_key: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct EnrichedSignRequest {
+    pub inner: SignRequest,
+    pub group_id: String,
     pub i: u16,
     pub s_l: Vec<u16>,
-    pub local_key: LocalKey<Secp256k1>,
 }
 
 #[derive(Message, Serialize, Deserialize, Clone)]

@@ -34,6 +34,8 @@ use anyhow::{Context, Result};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct SignPayload {
+    public_key: String,
+    participant_public_keys: Vec<String>,
     message: String,
 }
 
@@ -103,14 +105,13 @@ fn main() -> std::io::Result<()> {
                                  own_public_key: own_public_key.clone()
                              });
                         }
-                        Either::Right(SignPayload{message}) => {
+                        Either::Right(SignPayload{message, public_key, participant_public_keys}) => {
 
                             let result = coordinator.do_send(SignRequest {
-                                message: message.clone(),
-                                room: "1234".to_string(),
-                                i,
-                                s_l: vec![1, 2],
-                                local_key: local_share1.clone(),
+                                participant_public_keys,
+                                public_key,
+                                message,
+                                own_public_key: own_public_key.clone()
                             });
                         }
                     }
