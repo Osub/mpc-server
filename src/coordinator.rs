@@ -26,7 +26,6 @@ use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::Signature
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{Keygen, Error as KeygenError, ProtocolMessage as KeygenProtocolMessage, LocalKey};
 use crate::group::{MpcGroup, PublicKeyGroup};
 use thiserror::Error;
-use crate::coordinator::GroupError::WrongPublicKey;
 use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Error)]
@@ -41,6 +40,8 @@ enum GroupError {
 enum DataError {
     #[error("Couldn't find the local share for {0}.")]
     LocalShareNotFound(String),
+    #[error("Couldn't find the group of id {0}.")]
+    GroupNotFound(String),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -52,7 +53,6 @@ struct StoredLocalShare {
 
 pub struct Coordinator {
     db : sled::Db,
-    groups: HashMap<String, PublicKeyGroup>,
     keygen_runners: HashMap<String, Addr<MpcPlayer<KeygenRequest, Keygen, <Keygen as StateMachine>::Err, <Keygen as StateMachine>::Output>>>,
     offline_state_runners: HashMap<String, Addr<MpcPlayer<EnrichedSignRequest, OfflineStage, <OfflineStage as StateMachine>::Err, <OfflineStage as StateMachine>::Output>>>,
     signers: HashMap<String, Addr<Signer<EnrichedSignRequest>>>,
@@ -78,7 +78,6 @@ impl Coordinator {
             ctx.add_stream(stream);
             Self {
                 db,
-                groups: HashMap::new(),
                 keygen_runners: HashMap::new(),
                 offline_state_runners: HashMap::new(),
                 signers: HashMap::new(),
@@ -89,8 +88,8 @@ impl Coordinator {
 
     fn valid_sender(&mut self, msg: IncomingEnvelope) -> Result<()> {
         let room = msg.room;
-        let group = self.groups.get(&room).context("Can't found group.")?;
-        group.get_index(&msg.sender_public_key).map_or(Err(WrongPublicKey), |_|Ok(())).context("Validate sender.")?;
+        let group = self.retrieve_group(room.clone()).context("Retrieve group.")?;
+        group.get_index(&msg.sender_public_key).map_or(Err(GroupError::WrongPublicKey), |_|Ok(())).context("Validate sender.")?;
         Ok(())
     }
 
@@ -145,6 +144,7 @@ impl Coordinator {
                 }
             }
             Err(_)=>{
+                log::debug!("Not valid sender.")
                 // Do nothing
             }
         }
@@ -171,6 +171,26 @@ impl Coordinator {
             })
                 .await;
         }
+    }
+    fn save_group(&mut self, group: PublicKeyGroup) -> Result<()> {
+        let value = serde_json::to_vec_pretty(&group).context("serialize local share")?;
+        let key = group.get_group_id();
+        let ov: Option<&[u8]> = None;
+        let nv: Option<&[u8]> = Some(value.as_slice()); // TODO: Encrypt payload
+        self.db.compare_and_swap(
+            key.as_bytes(),      // key
+            ov, // old value, None for not present
+            nv, // new value, None for delete
+        ).context("Save to db.")?;
+        Ok(())
+    }
+    fn retrieve_group(&mut self, group_id: String) -> Result<PublicKeyGroup> {
+        let group = self.db.get(group_id.as_bytes())?
+            .ok_or_else(||DataError::GroupNotFound(group_id.clone()))
+            .context("Retrieving group.")?;
+        let group = serde_json::from_slice::<PublicKeyGroup>(group.as_ref())
+            .context("Decode group.")?;
+        Ok(group)
     }
     fn save_local_share(&mut self, local_share: StoredLocalShare) -> Result<()> {
         let out = serde_json::to_vec_pretty(&local_share).context("serialize local share")?;
@@ -218,7 +238,7 @@ impl Handler<KeygenRequest> for Coordinator {
             ctx.address().recipient(),
             ctx.address().recipient(),
         ).start();
-        self.groups.insert(group_id.clone(), group);
+        self.save_group(group.clone());
         self.keygen_runners.insert(group_id.clone(), player);
         Ok(())
     }
@@ -355,7 +375,6 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, SignatureRecid>> for Coordinato
             |serialized|log::info!("Sign request done {:?}", serialized)
         );
     }
-
 }
 
 impl StreamHandler<Result<IncomingEnvelope>> for Coordinator

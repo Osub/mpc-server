@@ -10,14 +10,8 @@ pub struct Cli {
     pub port: u16,
 
     #[structopt(short, long)]
-    pub local_share: PathBuf,
-
-    #[structopt(short, long)]
     pub secret_key_path: PathBuf,
 
     #[structopt(short, long)]
     pub db_path: PathBuf,
-
-    #[structopt(short, long)]
-    pub index: u16,
 }

@@ -49,9 +49,6 @@ type Payload = Either<KeygenPayload, SignPayload>;
 
 struct AppState {
     tx: UnboundedSender<Payload>,
-    i: u16,
-    s_l: Vec<u16>,
-    local_key: LocalKey<Secp256k1>,
 }
 
 struct Task(Box<dyn Fn(&mut LocalQueue<Task>) + Send>);
@@ -87,11 +84,7 @@ fn main() -> std::io::Result<()> {
     let sys = actix::System::new();
     let (sk, pk) = get_secret_key(args.secret_key_path.clone()).context("Can't find secret key path.").unwrap();
     let own_public_key = hex::encode(pk.serialize_compressed());
-    let local_share = std::fs::read(args.local_share).unwrap();
-    let local_share = serde_json::from_slice::<LocalKey<Secp256k1>>(&local_share).unwrap();
     let db: sled::Db = sled::open(args.db_path).unwrap();
-    let i = args.index.clone();
-    let local_share1 = local_share.clone();
     let s = async move {
         match join_computation(args.messenger_address, sk).await {
             Ok((incoming, outgoing)) => {
@@ -127,9 +120,6 @@ fn main() -> std::io::Result<()> {
         App::new()
             .app_data(web::Data::new(AppState {
                 tx: tx.clone(),
-                i: args.index,
-                s_l: Vec::try_from([1, 2]).unwrap(),
-                local_key: local_share.clone(),
             }))
             .wrap(middleware::Logger::default())
             .route("/hello", web::get().to(|| async { "Hello World!" }))
