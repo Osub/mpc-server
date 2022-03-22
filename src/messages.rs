@@ -16,6 +16,7 @@ pub struct MaybeProceed;
 #[derive(Message, Serialize, Deserialize, Clone, Debug)]
 #[rtype(result = "Result<()>")]
 pub struct KeygenRequest {
+    pub request_id: String,
     pub public_keys: Vec<String>,
     pub t: u16,
     pub own_public_key: String,
@@ -24,6 +25,7 @@ pub struct KeygenRequest {
 #[derive(Message, Serialize, Deserialize, Clone, Debug)]
 #[rtype(result = "Result<()>")]
 pub struct SignRequest {
+    pub request_id: String,
     pub public_key: String,
     pub participant_public_keys: Vec<String>,
     pub message: String,

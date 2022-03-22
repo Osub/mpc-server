@@ -27,6 +27,8 @@ use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::key
 use crate::group::{MpcGroup, PublicKeyGroup};
 use thiserror::Error;
 use serde::{Serialize, Deserialize};
+use tokio::sync::mpsc::UnboundedSender;
+use crate::ResponsePayload;
 
 #[derive(Debug, Error)]
 enum GroupError {
@@ -52,6 +54,7 @@ struct StoredLocalShare {
 }
 
 pub struct Coordinator {
+    tx_res: UnboundedSender<ResponsePayload>,
     db : sled::Db,
     keygen_runners: HashMap<String, Addr<MpcPlayer<KeygenRequest, Keygen, <Keygen as StateMachine>::Err, <Keygen as StateMachine>::Output>>>,
     offline_state_runners: HashMap<String, Addr<MpcPlayer<EnrichedSignRequest, OfflineStage, <OfflineStage as StateMachine>::Err, <OfflineStage as StateMachine>::Output>>>,
@@ -60,7 +63,7 @@ pub struct Coordinator {
 }
 
 impl Coordinator {
-    pub fn new<Si, St>(db:sled::Db, stream: St, sink: Si) -> Addr<Self>
+    pub fn new<Si, St>(tx_res: UnboundedSender<ResponsePayload>, db:sled::Db, stream: St, sink: Si) -> Addr<Self>
         where
             St: Stream<Item=Result<SignedEnvelope<String>>> + 'static,
             Si: Sink<Envelope, Error=anyhow::Error> + 'static,
@@ -77,6 +80,7 @@ impl Coordinator {
         Self::create(|ctx| {
             ctx.add_stream(stream);
             Self {
+                tx_res,
                 db,
                 keygen_runners: HashMap::new(),
                 offline_state_runners: HashMap::new(),
@@ -224,7 +228,13 @@ impl Handler<KeygenRequest> for Coordinator {
 
     fn handle(&mut self, req: KeygenRequest, ctx: &mut Context<Self>) -> Self::Result {
         log::info!("Received request {:?}", req);
-        let KeygenRequest{public_keys, t, own_public_key} = req.clone();
+        let KeygenRequest{request_id, public_keys, t, own_public_key} = req.clone();
+        self.tx_res.send(ResponsePayload{
+            request_id,
+            result: None,
+            request_type: "KEYGEN".to_owned(),
+            request_status: "PROCESSING".to_owned()
+        });
         let group = PublicKeyGroup::new(public_keys, t , own_public_key);
         let group_id = group.get_group_id();
 
@@ -267,6 +277,14 @@ impl Handler<SignRequest> for Coordinator {
         } else {
             Err(GroupError::WrongPublicKeys)
         }.context("Find index of participants")?;
+
+        self.tx_res.send(ResponsePayload{
+            request_id: req.request_id.clone(),
+            result: None,
+            request_type: "SIGN".to_owned(),
+            request_status: "PROCESSING".to_owned()
+        });
+
         let req = EnrichedSignRequest {
             inner: req,
             group_id: group.get_group_id(),
@@ -322,11 +340,20 @@ impl Handler<ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>> for Coordinator
         let sum_pk = hex::encode(sum_pk_bytes.deref());
         log::info!("Public key is {:?}", sum_pk);
         let share = msg.output.clone();
+        let request_id = msg.input.request_id.clone();
         let saved = self.save_local_share(StoredLocalShare{
             public_keys: msg.input.public_keys,
             own_public_key: msg.input.own_public_key,
             share: msg.output
         });
+
+        self.tx_res.send(ResponsePayload{
+            request_id,
+            result: Some(sum_pk),
+            request_type: "KEYGEN".to_owned(),
+            request_status: "DONE".to_owned()
+        });
+
         match saved {
             Ok(())=> {
                 log::debug!("Saved local share: {:?}", share);
@@ -359,6 +386,14 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coo
                 ctx.address().recipient(),
             ).start();
             self.signers.insert(msg.input.group_id.to_owned(), signer);
+            let request_id = msg.input.inner.request_id.clone();
+            self.tx_res.send(ResponsePayload{
+                request_id,
+                result: None,
+                request_type: "SIGN".to_owned(),
+                request_status: "OFFLINE_STAGE_DONE".to_owned()
+            });
+
             Ok(())
         };
         do_it();
@@ -371,9 +406,21 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, SignatureRecid>> for Coordinato
     type Result = ();
 
     fn handle(&mut self, msg: ProtocolOutput<EnrichedSignRequest, SignatureRecid>, ctx: &mut Context<Self>) {
-        serde_json::to_string(&msg).context("serialize signature").map(
-            |serialized|log::info!("Sign request done {:?}", serialized)
-        );
+        let serialized = serde_json::to_string(&msg).context("serialize signature");
+
+        match serialized {
+            Ok(serialized) => {
+                log::info!("Sign request done {:?}", serialized);
+                let request_id = msg.input.inner.request_id.clone();
+                self.tx_res.send(ResponsePayload{
+                    request_id,
+                    result: Some(serialized),
+                    request_type: "SIGN".to_owned(),
+                    request_status: "DONE".to_owned()
+                });
+            }
+            Err(_) => {}
+        };
     }
 }
 
