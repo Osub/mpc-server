@@ -83,12 +83,19 @@ async fn result(data: web::Data<AppState>, request_id: web::Path<String>) -> imp
     let request_id = request_id.into_inner();
     let response = data.results_db.get(request_id.as_bytes());
     let NOT_FOUND = "{\"error\": \"Not found\"}";
+    let NOT_FOUND = HttpResponse::NotFound().content_type("application/json").body(NOT_FOUND);
+    if response.is_err() {
+        return NOT_FOUND
+    }
+    if response.as_ref().unwrap().is_none() {
+        return NOT_FOUND
+    }
+    let response = response.unwrap().unwrap();
+    let response = String::from_utf8(response.to_vec());
+
     match response {
-        Ok(Some(bytes)) => {
-            let out = from_utf8(&bytes).map_or(NOT_FOUND, |x|x);
-            format!("{}", out.clone())
-        }
-        _ => format!("{}", NOT_FOUND)
+        Ok(r) => {HttpResponse::Ok().content_type("application/json").body(r)}
+        Err(_) => NOT_FOUND
     }
 }
 
