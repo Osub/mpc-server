@@ -85,16 +85,16 @@ async fn result(data: web::Data<AppState>, request_id: web::Path<String>) -> imp
     let NOT_FOUND = "{\"error\": \"Not found\"}";
     let NOT_FOUND = HttpResponse::NotFound().content_type("application/json").body(NOT_FOUND);
     if response.is_err() {
-        return NOT_FOUND
+        return NOT_FOUND;
     }
     if response.as_ref().unwrap().is_none() {
-        return NOT_FOUND
+        return NOT_FOUND;
     }
     let response = response.unwrap().unwrap();
     let response = String::from_utf8(response.to_vec());
 
     match response {
-        Ok(r) => {HttpResponse::Ok().content_type("application/json").body(r)}
+        Ok(r) => { HttpResponse::Ok().content_type("application/json").body(r) }
         Err(_) => NOT_FOUND
     }
 }
@@ -128,20 +128,21 @@ fn main() -> std::io::Result<()> {
                 while let Some(payload) = rx.recv().await {
                     log::info!("Received request {:?}", payload);
                     match payload {
-                         Either::Left(KeygenPayload{request_id, public_keys, t}) => {
-                             let result = coordinator.do_send(KeygenRequest {
-                                 request_id, public_keys, t,
-                                 own_public_key: own_public_key.clone()
-                             });
+                        Either::Left(KeygenPayload { request_id, public_keys, t }) => {
+                            let result = coordinator.do_send(KeygenRequest {
+                                request_id,
+                                public_keys,
+                                t,
+                                own_public_key: own_public_key.clone(),
+                            });
                         }
-                        Either::Right(SignPayload{request_id, message, public_key, participant_public_keys}) => {
-
+                        Either::Right(SignPayload { request_id, message, public_key, participant_public_keys }) => {
                             let result = coordinator.do_send(SignRequest {
                                 request_id,
                                 participant_public_keys,
                                 public_key,
                                 message,
-                                own_public_key: own_public_key.clone()
+                                own_public_key: own_public_key.clone(),
                             });
                         }
                     }
@@ -171,22 +172,21 @@ fn main() -> std::io::Result<()> {
     Arbiter::new().spawn(s);
     Arbiter::new().spawn(handle_response);
 
-    let server = move || { HttpServer::new(move || {
-        App::new()
-            .app_data(web::Data::new(AppState {
-                tx: tx.clone(),
-                results_db: results_db.clone(),
-            }))
-            .wrap(middleware::Logger::default())
-            .route("/hello", web::get().to(|| async { "Hello World!" }))
-            .route("/keygen", web::post().to(keygen))
-            .route("/sign", web::post().to(sign))
-            .route("/result/{request_id}", web::post().to(result))
-        // .service(greet)
-    })
-        .bind(("127.0.0.1", args.port))
-        .unwrap()
-        .run()
+    let server = move || {
+        HttpServer::new(move || {
+            App::new()
+                .app_data(web::Data::new(AppState {
+                    tx: tx.clone(),
+                    results_db: results_db.clone(),
+                }))
+                .wrap(middleware::Logger::default())
+                .route("/keygen", web::post().to(keygen))
+                .route("/sign", web::post().to(sign))
+                .route("/result/{request_id}", web::post().to(result))
+        })
+            .bind(("127.0.0.1", args.port))
+            .unwrap()
+            .run()
     };
 
     sys.block_on(server())

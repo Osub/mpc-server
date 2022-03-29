@@ -55,7 +55,7 @@ struct StoredLocalShare {
 
 pub struct Coordinator {
     tx_res: UnboundedSender<ResponsePayload>,
-    db : sled::Db,
+    db: sled::Db,
     keygen_runners: HashMap<String, Addr<MpcPlayer<KeygenRequest, Keygen, <Keygen as StateMachine>::Err, <Keygen as StateMachine>::Output>>>,
     offline_state_runners: HashMap<String, Addr<MpcPlayer<EnrichedSignRequest, OfflineStage, <OfflineStage as StateMachine>::Err, <OfflineStage as StateMachine>::Output>>>,
     signers: HashMap<String, Addr<Signer<EnrichedSignRequest>>>,
@@ -63,7 +63,7 @@ pub struct Coordinator {
 }
 
 impl Coordinator {
-    pub fn new<Si, St>(tx_res: UnboundedSender<ResponsePayload>, db:sled::Db, stream: St, sink: Si) -> Addr<Self>
+    pub fn new<Si, St>(tx_res: UnboundedSender<ResponsePayload>, db: sled::Db, stream: St, sink: Si) -> Addr<Self>
         where
             St: Stream<Item=Result<SignedEnvelope<String>>> + 'static,
             Si: Sink<Envelope, Error=anyhow::Error> + 'static,
@@ -93,7 +93,7 @@ impl Coordinator {
     fn valid_sender(&mut self, msg: IncomingEnvelope) -> Result<()> {
         let room = msg.room;
         let group = self.retrieve_group(room.clone()).context("Retrieve group.")?;
-        group.get_index(&msg.sender_public_key).map_or(Err(GroupError::WrongPublicKey), |_|Ok(())).context("Validate sender.")?;
+        group.get_index(&msg.sender_public_key).map_or(Err(GroupError::WrongPublicKey), |_| Ok(())).context("Validate sender.")?;
         Ok(())
     }
 
@@ -134,25 +134,24 @@ impl Coordinator {
     fn handle_incoming(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) {
         match self.valid_sender(msg.clone()) {
             Ok(()) => {
-                let h1= self.handle_incoming_offline(msg.clone(), ctx);
+                let h1 = self.handle_incoming_offline(msg.clone(), ctx);
                 let h2 = self.handle_incoming_sign(msg.clone(), ctx);
                 let h3 = self.handle_incoming_keygen(msg.clone(), ctx);
                 if h1.or(h2).or(h3).is_err() {
-                    ctx.run_later(Duration::from_secs(1), move|a, _ctx| {
+                    ctx.run_later(Duration::from_secs(1), move |a, _ctx| {
                         _ctx.notify(RetryEnvelope {
                             room: msg.room.clone(),
                             message: msg.message.clone(),
-                            sender_public_key: msg.sender_public_key.clone()
+                            sender_public_key: msg.sender_public_key.clone(),
                         });
                     });
                 }
             }
-            Err(_)=>{
+            Err(_) => {
                 log::debug!("Not valid sender.")
                 // Do nothing
             }
         }
-
     }
 
     fn send_one(envelope: OutgoingEnvelope) -> impl Future<Output=()> {
@@ -190,7 +189,7 @@ impl Coordinator {
     }
     fn retrieve_group(&mut self, group_id: String) -> Result<PublicKeyGroup> {
         let group = self.db.get(group_id.as_bytes())?
-            .ok_or_else(||DataError::GroupNotFound(group_id.clone()))
+            .ok_or_else(|| DataError::GroupNotFound(group_id.clone()))
             .context("Retrieving group.")?;
         let group = serde_json::from_slice::<PublicKeyGroup>(group.as_ref())
             .context("Decode group.")?;
@@ -211,7 +210,7 @@ impl Coordinator {
     }
     fn retrieve_local_share(&mut self, public_key: String) -> Result<StoredLocalShare> {
         let local_share = self.db.get(public_key.as_bytes())?
-            .ok_or_else(||DataError::LocalShareNotFound(public_key.clone()))
+            .ok_or_else(|| DataError::LocalShareNotFound(public_key.clone()))
             .context("Retrieving local share.")?;
         let local_share = serde_json::from_slice::<StoredLocalShare>(local_share.as_ref())
             .context("Decode local share.")?;
@@ -228,14 +227,14 @@ impl Handler<KeygenRequest> for Coordinator {
 
     fn handle(&mut self, req: KeygenRequest, ctx: &mut Context<Self>) -> Self::Result {
         log::info!("Received request {:?}", req);
-        let KeygenRequest{request_id, public_keys, t, own_public_key} = req.clone();
-        self.tx_res.send(ResponsePayload{
+        let KeygenRequest { request_id, public_keys, t, own_public_key } = req.clone();
+        self.tx_res.send(ResponsePayload {
             request_id,
             result: None,
             request_type: "KEYGEN".to_owned(),
-            request_status: "PROCESSING".to_owned()
+            request_status: "PROCESSING".to_owned(),
         });
-        let group = PublicKeyGroup::new(public_keys, t , own_public_key);
+        let group = PublicKeyGroup::new(public_keys, t, own_public_key);
         let group_id = group.get_group_id();
 
         let state = Keygen::new(group.get_i(), group.get_t(), group.get_n()).context("Create state machine")?;
@@ -267,22 +266,22 @@ impl Handler<SignRequest> for Coordinator {
         );
         // let public_keys = local_share.public_keys;
         // public_keys.iter().position(|&r| *r == k)
-        let indices:Vec<Option<usize>> = req.participant_public_keys.clone().into_iter().map(
+        let indices: Vec<Option<usize>> = req.participant_public_keys.clone().into_iter().map(
             |k| group.get_index(&k)
         ).collect();
         let (indices, errors): (Vec<Option<usize>>, Vec<_>) = indices.into_iter().partition(Option::is_some);
 
-        let s_l:Vec<u16> = if errors.len() == 0 {
+        let s_l: Vec<u16> = if errors.len() == 0 {
             Ok(indices.into_iter().map(|o| o.expect("Index") as u16).collect())
         } else {
             Err(GroupError::WrongPublicKeys)
         }.context("Find index of participants")?;
 
-        self.tx_res.send(ResponsePayload{
+        self.tx_res.send(ResponsePayload {
             request_id: req.request_id.clone(),
             result: None,
             request_type: "SIGN".to_owned(),
-            request_status: "PROCESSING".to_owned()
+            request_status: "PROCESSING".to_owned(),
         });
 
         let req = EnrichedSignRequest {
@@ -341,27 +340,26 @@ impl Handler<ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>> for Coordinator
         log::info!("Public key is {:?}", sum_pk);
         let share = msg.output.clone();
         let request_id = msg.input.request_id.clone();
-        let saved = self.save_local_share(StoredLocalShare{
+        let saved = self.save_local_share(StoredLocalShare {
             public_keys: msg.input.public_keys,
             own_public_key: msg.input.own_public_key,
-            share: msg.output
+            share: msg.output,
         });
 
-        self.tx_res.send(ResponsePayload{
+        self.tx_res.send(ResponsePayload {
             request_id,
             result: Some(sum_pk),
             request_type: "KEYGEN".to_owned(),
-            request_status: "DONE".to_owned()
+            request_status: "DONE".to_owned(),
         });
 
         match saved {
-            Ok(())=> {
+            Ok(()) => {
                 log::debug!("Saved local share: {:?}", share);
             }
-            Err(e) => {log::error!("Failed to save local share: {}", e);}
+            Err(e) => { log::error!("Failed to save local share: {}", e); }
         }
     }
-
 }
 
 impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coordinator
@@ -370,8 +368,7 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coo
 
     fn handle(&mut self, msg: ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>, ctx: &mut Context<Self>) {
         log::info!("result {:?}", msg.output.public_key());
-        let do_it = ||-> Result<()>{
-
+        let do_it = || -> Result<()>{
             let message = BigInt::from_bytes(msg.input.inner.message.as_bytes());
             let completed_offline_stage = msg.output;
             let input = msg.input.clone();
@@ -379,7 +376,7 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coo
                 input.clone(),
                 input.group_id,
                 input.i,
-                input.s_l.len()-1,
+                input.s_l.len() - 1,
                 message,
                 completed_offline_stage,
                 ctx.address().recipient(),
@@ -387,18 +384,17 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coo
             ).start();
             self.signers.insert(msg.input.group_id.to_owned(), signer);
             let request_id = msg.input.inner.request_id.clone();
-            self.tx_res.send(ResponsePayload{
+            self.tx_res.send(ResponsePayload {
                 request_id,
                 result: None,
                 request_type: "SIGN".to_owned(),
-                request_status: "OFFLINE_STAGE_DONE".to_owned()
+                request_status: "OFFLINE_STAGE_DONE".to_owned(),
             });
 
             Ok(())
         };
         do_it();
     }
-
 }
 
 impl Handler<ProtocolOutput<EnrichedSignRequest, SignatureRecid>> for Coordinator
@@ -412,11 +408,11 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, SignatureRecid>> for Coordinato
             Ok(serialized) => {
                 log::info!("Sign request done {:?}", serialized);
                 let request_id = msg.input.inner.request_id.clone();
-                self.tx_res.send(ResponsePayload{
+                self.tx_res.send(ResponsePayload {
                     request_id,
                     result: Some(serialized),
                     request_type: "SIGN".to_owned(),
-                    request_status: "DONE".to_owned()
+                    request_status: "DONE".to_owned(),
                 });
             }
             Err(_) => {}

@@ -63,7 +63,7 @@ impl<I> Signer<I>
         let completed_offline_stage = self.completed_offline_stage.clone();
         let (_, partial_sig) = SignManual::new(
             message,
-            completed_offline_stage
+            completed_offline_stage,
         )?;
         let sig_msg = Msg {
             sender: self.index,
@@ -88,16 +88,15 @@ impl<I> Signer<I>
         let completed_offline_stage = self.completed_offline_stage.clone();
         let (state, _) = SignManual::new(
             message,
-            completed_offline_stage
+            completed_offline_stage,
         )?;
 
         if self.partial_sigs.len() == self.t {
-
             match state.complete(&self.partial_sigs) {
                 Ok(signature) => {
                     self.result_collector.do_send(ProtocolOutput {
                         input: self.input.clone(),
-                        output: signature
+                        output: signature,
                     });
                 }
                 Err(e) => {

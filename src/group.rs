@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use serde::{Serialize, Deserialize};
 
 pub trait MpcGroup {
-    fn valid_msg<T>(&self, sender_public_key: &String, msg: &Msg<T>)-> bool;
+    fn valid_msg<T>(&self, sender_public_key: &String, msg: &Msg<T>) -> bool;
     fn get_i(&self) -> u16;
     fn get_t(&self) -> u16;
     fn get_n(&self) -> u16;
@@ -43,7 +43,6 @@ impl PublicKeyGroup {
     pub fn get_index(&self, public_key: &String) -> Option<usize> {
         self.public_keys.iter().position(|pk| *pk == *public_key).map(|i| i + 1)
     }
-
 }
 
 impl MpcGroup for PublicKeyGroup {
