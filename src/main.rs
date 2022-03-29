@@ -24,6 +24,7 @@ mod transport;
 
 struct AppState {
     tx: UnboundedSender<Payload>,
+    tx_res: UnboundedSender<ResponsePayload>,
     results_db: sled::Db,
 }
 
@@ -42,14 +43,14 @@ async fn keygen(data: web::Data<AppState>, req: web::Json<KeygenPayload>) -> imp
     if exists_already {
         return HttpResponse::BadRequest().body(format!("A request of id \"{}\" already exists.", req.request_id));
     }
-    match data.tx.send(Either::Left(req.0.clone())) {
+    let _ = data.tx_res.send(ResponsePayload{
+        request_id: req.0.request_id.clone(),
+        result: None,
+        request_type: "KEYGEN".to_owned(),
+        request_status: "RECEIVED".to_owned(),
+    });
+    match data.tx.send(Either::Left(req.0)) {
         Ok(_) => {
-            let _ = save_result(&data.results_db, ResponsePayload{
-                request_id: req.0.request_id,
-                result: None,
-                request_type: "KEYGEN".to_owned(),
-                request_status: "RECEIVED".to_owned(),
-            });
             HttpResponse::Ok().body("Request received!")
         }
         Err(_) => {
@@ -63,14 +64,14 @@ async fn sign(data: web::Data<AppState>, req: web::Json<SignPayload>) -> impl Re
     if exists_already {
         return HttpResponse::BadRequest().body(format!("A request of id \"{}\" already exists.", req.request_id));
     }
-    match data.tx.send(Either::Right(req.0.clone())) {
+    let _ = data.tx_res.send(ResponsePayload{
+        request_id: req.0.request_id.clone(),
+        result: None,
+        request_type: "KEYGEN".to_owned(),
+        request_status: "RECEIVED".to_owned(),
+    });
+    match data.tx.send(Either::Right(req.0)) {
         Ok(_) => {
-            let _ = save_result(&data.results_db, ResponsePayload{
-                request_id: req.0.request_id,
-                result: None,
-                request_type: "SIGN".to_owned(),
-                request_status: "RECEIVED".to_owned(),
-            });
             HttpResponse::Ok().body("Request received!")
         }
         Err(_) => {
@@ -121,10 +122,11 @@ fn main() -> std::io::Result<()> {
     let results_db: sled::Db = sled::open(results_path).unwrap();
     let local_shares_path = args.db_path.join("local_shares");
     let local_share_db: sled::Db = sled::open(local_shares_path).unwrap();
+    let tx_res1 = tx_res.clone();
     let s = async move {
         match join_computation(args.messenger_address, sk).await {
             Ok((incoming, outgoing)) => {
-                let coordinator = Coordinator::new(tx_res, local_share_db, incoming, outgoing);
+                let coordinator = Coordinator::new(tx_res1, local_share_db, incoming, outgoing);
                 while let Some(payload) = rx.recv().await {
                     handle(&coordinator, own_public_key.clone(), payload);
                 }
@@ -148,6 +150,7 @@ fn main() -> std::io::Result<()> {
             App::new()
                 .app_data(web::Data::new(AppState {
                     tx: tx.clone(),
+                    tx_res: tx_res.clone(),
                     results_db: results_db.clone(),
                 }))
                 .wrap(middleware::Logger::default())
