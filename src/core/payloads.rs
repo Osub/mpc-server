@@ -1,7 +1,7 @@
 use either::Either;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SignPayload {
     pub request_id: String,
     pub public_key: String,
@@ -9,14 +9,14 @@ pub struct SignPayload {
     pub message: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct KeygenPayload {
     pub request_id: String,
     pub public_keys: Vec<String>,
     pub t: u16,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ResponsePayload {
     pub request_id: String,
     pub result: Option<String>,

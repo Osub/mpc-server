@@ -12,8 +12,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 use cli::Cli;
 
-use crate::actors::Coordinator;
-use crate::actors::messages::{KeygenRequest, SignRequest};
+use crate::actors::{Coordinator, handle};
 use crate::core::{KeygenPayload, Payload, ResponsePayload, SignPayload};
 use crate::transport::join_computation;
 
@@ -28,17 +27,56 @@ struct AppState {
     results_db: sled::Db,
 }
 
-async fn keygen(data: web::Data<AppState>, req: web::Json<KeygenPayload>) -> impl Responder {
-    log::info!("handling");
-    let _ = data.tx.send(Either::Left(req.0));
-    format!("Hi there!")
+fn save_result(db: &sled::Db, response: ResponsePayload) -> Result<()> {
+    let key = response.request_id.clone();
+    let value = serde_json::to_vec_pretty(&response)?;
+    db.insert(
+        key.as_bytes(),
+        value.as_slice(),
+    )?;
+    Ok(())
 }
 
+async fn keygen(data: web::Data<AppState>, req: web::Json<KeygenPayload>) -> impl Responder {
+    let exists_already = data.results_db.contains_key(req.request_id.as_bytes()).map_or(false, |x|x);
+    if exists_already {
+        return HttpResponse::BadRequest().body(format!("A request of id \"{}\" already exists.", req.request_id));
+    }
+    match data.tx.send(Either::Left(req.0.clone())) {
+        Ok(_) => {
+            let _ = save_result(&data.results_db, ResponsePayload{
+                request_id: req.0.request_id,
+                result: None,
+                request_type: "KEYGEN".to_owned(),
+                request_status: "RECEIVED".to_owned(),
+            });
+            HttpResponse::Ok().body("Request received!")
+        }
+        Err(_) => {
+            HttpResponse::InternalServerError().body("Failed to queue the request.")
+        }
+    }
+}
 
 async fn sign(data: web::Data<AppState>, req: web::Json<SignPayload>) -> impl Responder {
-    log::info!("handling");
-    let _ = data.tx.send(Either::Right(req.0));
-    format!("Hi there!")
+    let exists_already = data.results_db.contains_key(req.request_id.as_bytes()).map_or(false, |x|x);
+    if exists_already {
+        return HttpResponse::BadRequest().body(format!("A request of id \"{}\" already exists.", req.request_id));
+    }
+    match data.tx.send(Either::Right(req.0.clone())) {
+        Ok(_) => {
+            let _ = save_result(&data.results_db, ResponsePayload{
+                request_id: req.0.request_id,
+                result: None,
+                request_type: "SIGN".to_owned(),
+                request_status: "RECEIVED".to_owned(),
+            });
+            HttpResponse::Ok().body("Request received!")
+        }
+        Err(_) => {
+            HttpResponse::InternalServerError().body("Failed to queue the request.")
+        }
+    }
 }
 
 async fn result(data: web::Data<AppState>, request_id: web::Path<String>) -> impl Responder {
@@ -88,26 +126,7 @@ fn main() -> std::io::Result<()> {
             Ok((incoming, outgoing)) => {
                 let coordinator = Coordinator::new(tx_res, local_share_db, incoming, outgoing);
                 while let Some(payload) = rx.recv().await {
-                    log::info!("Received request {:?}", payload);
-                    match payload {
-                        Either::Left(KeygenPayload { request_id, public_keys, t }) => {
-                            let _ = coordinator.do_send(KeygenRequest {
-                                request_id,
-                                public_keys,
-                                t,
-                                own_public_key: own_public_key.clone(),
-                            });
-                        }
-                        Either::Right(SignPayload { request_id, message, public_key, participant_public_keys }) => {
-                            let _ = coordinator.do_send(SignRequest {
-                                request_id,
-                                participant_public_keys,
-                                public_key,
-                                message,
-                                own_public_key: own_public_key.clone(),
-                            });
-                        }
-                    }
+                    handle(&coordinator, own_public_key.clone(), payload);
                 }
             }
             Err(_) => {}
@@ -117,17 +136,7 @@ fn main() -> std::io::Result<()> {
     let results_db1 = results_db.clone();
     let handle_response = async move {
         while let Some(response) = rx_res.recv().await {
-            let key = response.request_id.clone();
-            let value = serde_json::to_vec_pretty(&response);
-            match value {
-                Ok(value) => {
-                    let _ = results_db1.insert(
-                        key.as_bytes(),
-                        value.as_slice(),
-                    );
-                }
-                Err(_) => {}
-            }
+            let _ = save_result(&results_db1, response);
         }
     };
 
