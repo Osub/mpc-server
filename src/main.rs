@@ -7,48 +7,21 @@ use actix_web::{App, HttpResponse, HttpServer, middleware, Responder, web};
 use anyhow::{Context, Result};
 use either::Either;
 use secp256k1::{PublicKey, SecretKey};
-use serde::{Deserialize, Serialize};
 use structopt::StructOpt;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 use cli::Cli;
 
-use crate::coordinator::Coordinator;
-use crate::messages::{KeygenRequest, SignRequest};
+use crate::actors::Coordinator;
+use crate::actors::messages::{KeygenRequest, SignRequest};
+use crate::core::{KeygenPayload, Payload, ResponsePayload, SignPayload};
 use crate::transport::join_computation;
 
-mod signer;
-mod player;
-mod coordinator;
-mod messages;
+mod core;
+mod actors;
 mod cli;
 mod transport;
-mod group;
 
-#[derive(Serialize, Deserialize, Debug)]
-struct SignPayload {
-    request_id: String,
-    public_key: String,
-    participant_public_keys: Vec<String>,
-    message: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct KeygenPayload {
-    request_id: String,
-    public_keys: Vec<String>,
-    t: u16,
-}
-
-type Payload = Either<KeygenPayload, SignPayload>;
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ResponsePayload {
-    request_id: String,
-    result: Option<String>,
-    request_type: String,
-    request_status: String,
-}
 
 struct AppState {
     tx: UnboundedSender<Payload>,

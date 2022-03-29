@@ -6,7 +6,7 @@ use secp256k1::{Message, PublicKey, SecretKey, sign, Signature, verify};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::messages::{Envelope, SignedEnvelope};
+use crate::actors::messages::{Envelope, SignedEnvelope};
 
 #[derive(Debug, Error)]
 enum VerifyError {

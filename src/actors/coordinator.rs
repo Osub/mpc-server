@@ -21,11 +21,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::group::{MpcGroup, PublicKeyGroup};
-use crate::messages::*;
-use crate::player::MpcPlayer;
-use crate::ResponsePayload;
-use crate::signer::Signer;
+use crate::core::{MpcGroup, PublicKeyGroup, ResponsePayload};
+use super::messages::*;
+use super::MpcPlayer;
+use super::Signer;
 
 #[derive(Debug, Error)]
 enum GroupError {

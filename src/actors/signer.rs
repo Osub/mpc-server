@@ -5,7 +5,7 @@ use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::Signature
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{CompletedOfflineStage, PartialSignature, SignManual};
 use round_based::Msg;
 
-use crate::messages::{IncomingMessage, OutgoingEnvelope, ProtocolOutput};
+use super::messages::{IncomingMessage, OutgoingEnvelope, ProtocolOutput};
 
 pub struct Signer<I: Send> {
     input: I,
