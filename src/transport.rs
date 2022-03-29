@@ -1,17 +1,12 @@
 use std::convert::TryInto;
-use std::ops::Deref;
-use anyhow::{Context, Result};
-use futures::{Sink, Stream, StreamExt, TryStreamExt};
-use serde::{de::DeserializeOwned, Deserialize, Serialize, Serializer};
-use structopt::StructOpt;
 
-use round_based::Msg;
-use crate::messages::{EcdsaSignature, Envelope, SignedEnvelope};
-use secp256k1::{SecretKey, Message, sign, verify, PublicKey, Signature};
-use secp256k1::curve::Scalar;
-use serde::ser::SerializeStruct;
+use anyhow::{Context, Result};
+use futures::{Sink, Stream, StreamExt};
+use secp256k1::{Message, PublicKey, SecretKey, sign, Signature, verify};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+
+use crate::messages::{Envelope, SignedEnvelope};
 
 #[derive(Debug, Error)]
 enum VerifyError {
@@ -48,7 +43,7 @@ fn sign_envelope(key: &SecretKey, pub_key: &String, envelope: Envelope) -> Resul
     let hash = hasher.finalize();
     let hbytes = hash.as_slice().try_into().context("Create hash")?;
     let message = Message::parse(hbytes);
-    let (sig, recid) = sign(&message, key);
+    let (sig, _recid) = sign(&message, key);
     let signature = hex::encode(sig.serialize());
     let signed = SignedEnvelope {
         room: envelope.room,

@@ -2,33 +2,30 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::ops::Deref;
 use std::pin::Pin;
-use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Duration;
-use crate::messages::*;
+
 use actix::prelude::*;
 use actix_interop::{critical_section, FutureInterop, with_ctx};
-use crate::player::MpcPlayer;
-use crate::signer::Signer;
-use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{OfflineStage, Error as OfflineStageError, CompletedOfflineStage, OfflineProtocolMessage, SignManual, PartialSignature};
-use round_based::{Msg, StateMachine};
-use crate::transport::join_computation;
-use anyhow::{Context as AnyhowContext, Error, Result};
+use anyhow::{Context as AnyhowContext, Result};
 use curv::arithmetic::Converter;
 use curv::BigInt;
 use curv::elliptic::curves::Secp256k1;
-use serde_json::ser::State;
-use futures::{future, Sink};
+use futures::Sink;
 use futures_util::SinkExt;
-use surf::Url;
 use futures_util::TryStreamExt;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::SignatureRecid;
-use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{Keygen, Error as KeygenError, ProtocolMessage as KeygenProtocolMessage, LocalKey};
-use crate::group::{MpcGroup, PublicKeyGroup};
+use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{Error as KeygenError, Keygen, LocalKey, ProtocolMessage as KeygenProtocolMessage};
+use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{CompletedOfflineStage, Error as OfflineStageError, OfflineProtocolMessage, OfflineStage, PartialSignature};
+use round_based::{Msg, StateMachine};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use serde::{Serialize, Deserialize};
 use tokio::sync::mpsc::UnboundedSender;
+
+use crate::group::{MpcGroup, PublicKeyGroup};
+use crate::messages::*;
+use crate::player::MpcPlayer;
 use crate::ResponsePayload;
+use crate::signer::Signer;
 
 #[derive(Debug, Error)]
 enum GroupError {
@@ -97,22 +94,22 @@ impl Coordinator {
         Ok(())
     }
 
-    fn handle_incoming_keygen(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) -> Result<()> {
+    fn handle_incoming_keygen(&mut self, msg: IncomingEnvelope, _: &mut Context<Self>) -> Result<()> {
         let room = msg.room;
         let addr = self.keygen_runners.get(&room).context("Can't found mpc player.")?;
         let msg = serde_json::from_str::<Msg<KeygenProtocolMessage>>(&msg.message).context("deserialize message")?;
-        addr.do_send(IncomingMessage {
+        let _ = addr.do_send(IncomingMessage {
             room: room.clone(),
             message: msg,
         });
         Ok(())
     }
 
-    fn handle_incoming_offline(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) -> Result<()> {
+    fn handle_incoming_offline(&mut self, msg: IncomingEnvelope, _: &mut Context<Self>) -> Result<()> {
         let room = msg.room;
         let addr = self.offline_state_runners.get(&room).context("Not found mpc player.")?;
         let msg = serde_json::from_str::<Msg<OfflineProtocolMessage>>(&msg.message).context("deserialize message")?;
-        addr.do_send(IncomingMessage {
+        let _ = addr.do_send(IncomingMessage {
             room: room.clone(),
             message: msg,
         });
@@ -120,7 +117,7 @@ impl Coordinator {
         Ok(())
     }
 
-    fn handle_incoming_sign(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) -> Result<()> {
+    fn handle_incoming_sign(&mut self, msg: IncomingEnvelope, _: &mut Context<Self>) -> Result<()> {
         let room = msg.room;
         let addr = self.signers.get(&room).context("Not found signer.")?;
         let msg = serde_json::from_str::<Msg<PartialSignature>>(&msg.message).context("deserialize message")?;
@@ -138,7 +135,7 @@ impl Coordinator {
                 let h2 = self.handle_incoming_sign(msg.clone(), ctx);
                 let h3 = self.handle_incoming_keygen(msg.clone(), ctx);
                 if h1.or(h2).or(h3).is_err() {
-                    ctx.run_later(Duration::from_secs(1), move |a, _ctx| {
+                    ctx.run_later(Duration::from_secs(1), move |_, _ctx| {
                         _ctx.notify(RetryEnvelope {
                             room: msg.room.clone(),
                             message: msg.message.clone(),
@@ -161,7 +158,7 @@ impl Coordinator {
                     .expect("Sink to be present");
 
                 // Send the request
-                sink.send(Envelope {
+                let _ = sink.send(Envelope {
                     room: envelope.room,
                     message: envelope.message,
                 }).await;
@@ -180,7 +177,7 @@ impl Coordinator {
         let key = group.get_group_id();
         let ov: Option<&[u8]> = None;
         let nv: Option<&[u8]> = Some(value.as_slice()); // TODO: Encrypt payload
-        self.db.compare_and_swap(
+        let _ = self.db.compare_and_swap(
             key.as_bytes(),      // key
             ov, // old value, None for not present
             nv, // new value, None for delete
@@ -201,7 +198,7 @@ impl Coordinator {
         let sum_pk = hex::encode(sum_pk_bytes.deref());
         let ov: Option<&[u8]> = None;
         let nv: Option<&[u8]> = Some(out.as_slice()); // TODO: Encrypt payload
-        self.db.compare_and_swap(
+        let _ = self.db.compare_and_swap(
             sum_pk.as_bytes(),      // key
             ov, // old value, None for not present
             nv, // new value, None for delete
@@ -228,7 +225,7 @@ impl Handler<KeygenRequest> for Coordinator {
     fn handle(&mut self, req: KeygenRequest, ctx: &mut Context<Self>) -> Self::Result {
         log::info!("Received request {:?}", req);
         let KeygenRequest { request_id, public_keys, t, own_public_key } = req.clone();
-        self.tx_res.send(ResponsePayload {
+        let _ = self.tx_res.send(ResponsePayload {
             request_id,
             result: None,
             request_type: "KEYGEN".to_owned(),
@@ -247,7 +244,7 @@ impl Handler<KeygenRequest> for Coordinator {
             ctx.address().recipient(),
             ctx.address().recipient(),
         ).start();
-        self.save_group(group.clone());
+        let _ = self.save_group(group.clone());
         self.keygen_runners.insert(group_id.clone(), player);
         Ok(())
     }
@@ -277,7 +274,7 @@ impl Handler<SignRequest> for Coordinator {
             Err(GroupError::WrongPublicKeys)
         }.context("Find index of participants")?;
 
-        self.tx_res.send(ResponsePayload {
+        let _ = self.tx_res.send(ResponsePayload {
             request_id: req.request_id.clone(),
             result: None,
             request_type: "SIGN".to_owned(),
@@ -334,7 +331,7 @@ impl Handler<ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>> for Coordinator
 {
     type Result = ();
 
-    fn handle(&mut self, msg: ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>, ctx: &mut Context<Self>) {
+    fn handle(&mut self, msg: ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>, _: &mut Context<Self>) {
         let sum_pk_bytes = msg.output.public_key().to_bytes(true);
         let sum_pk = hex::encode(sum_pk_bytes.deref());
         log::info!("Public key is {:?}", sum_pk);
@@ -346,7 +343,7 @@ impl Handler<ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>> for Coordinator
             share: msg.output,
         });
 
-        self.tx_res.send(ResponsePayload {
+        let _ = self.tx_res.send(ResponsePayload {
             request_id,
             result: Some(sum_pk),
             request_type: "KEYGEN".to_owned(),
@@ -384,7 +381,7 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coo
             ).start();
             self.signers.insert(msg.input.group_id.to_owned(), signer);
             let request_id = msg.input.inner.request_id.clone();
-            self.tx_res.send(ResponsePayload {
+            let _ = self.tx_res.send(ResponsePayload {
                 request_id,
                 result: None,
                 request_type: "SIGN".to_owned(),
@@ -393,7 +390,7 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coo
 
             Ok(())
         };
-        do_it();
+        let _ = do_it();
     }
 }
 
@@ -401,14 +398,14 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, SignatureRecid>> for Coordinato
 {
     type Result = ();
 
-    fn handle(&mut self, msg: ProtocolOutput<EnrichedSignRequest, SignatureRecid>, ctx: &mut Context<Self>) {
+    fn handle(&mut self, msg: ProtocolOutput<EnrichedSignRequest, SignatureRecid>, _: &mut Context<Self>) {
         let serialized = serde_json::to_string(&msg).context("serialize signature");
 
         match serialized {
             Ok(serialized) => {
                 log::info!("Sign request done {:?}", serialized);
                 let request_id = msg.input.inner.request_id.clone();
-                self.tx_res.send(ResponsePayload {
+                let _ = self.tx_res.send(ResponsePayload {
                     request_id,
                     result: Some(serialized),
                     request_type: "SIGN".to_owned(),

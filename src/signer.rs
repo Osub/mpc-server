@@ -1,22 +1,11 @@
-use std::sync::mpsc::{channel, sync_channel};
-use std::time::Duration;
 use actix::prelude::*;
-use actix_interop::{critical_section, FutureInterop, FutureInteropWrap, StreamInterop, with_ctx};
-use actix_web::body::MessageBody;
-use actix_web::cookie::time::Month::May;
-use actix_web::error::ErrorNotFound;
-use futures::{Sink, SinkExt, StreamExt, TryStream};
-use tokio::time::{self};
-use crate::messages::{Envelope, IncomingMessage, MaybeProceed, OutgoingEnvelope, OutgoingMessage, ProtocolError, ProtocolMessage, ProtocolOutput};
-use round_based::{Msg, StateMachine};
-
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use anyhow::{Context as AnyhowContext, Error, Result};
-use futures::stream;
-use futures_util::TryStreamExt;
+use anyhow::Result;
+use curv::BigInt;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::SignatureRecid;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{CompletedOfflineStage, PartialSignature, SignManual};
-use curv::BigInt;
+use round_based::Msg;
+
+use crate::messages::{IncomingMessage, OutgoingEnvelope, ProtocolOutput};
 
 pub struct Signer<I: Send> {
     input: I,
@@ -73,7 +62,7 @@ impl<I> Signer<I>
         match serde_json::to_string(&sig_msg) {
             Ok(serialized) => {
                 log::debug!("Sending message {:?}", serde_json::to_string(&sig_msg));
-                self.message_broker.do_send(OutgoingEnvelope {
+                let _ = self.message_broker.do_send(OutgoingEnvelope {
                     room: self.room.clone(),
                     message: serialized,
                 });
@@ -83,7 +72,7 @@ impl<I> Signer<I>
         Ok(())
     }
 
-    fn finish_if_possible(&mut self, ctx: &mut Context<Self>) -> Result<()> {
+    fn finish_if_possible(&mut self, _: &mut Context<Self>) -> Result<()> {
         let message = self.message.clone();
         let completed_offline_stage = self.completed_offline_stage.clone();
         let (state, _) = SignManual::new(
@@ -94,12 +83,12 @@ impl<I> Signer<I>
         if self.partial_sigs.len() == self.t {
             match state.complete(&self.partial_sigs) {
                 Ok(signature) => {
-                    self.result_collector.do_send(ProtocolOutput {
+                    let _ = self.result_collector.do_send(ProtocolOutput {
                         input: self.input.clone(),
                         output: signature,
                     });
                 }
-                Err(e) => {
+                Err(_) => {
                     //TODO: Handle error.
                 }
             };
@@ -113,9 +102,9 @@ impl<I> Actor for Signer<I>
         I: Send + Clone + Unpin + 'static,
 {
     type Context = Context<Self>;
-    fn started(&mut self, ctx: &mut Self::Context) {
+    fn started(&mut self, _: &mut Self::Context) {
         log::debug!("Started signer");
-        self.send_my_partial_signature();
+        let _ = self.send_my_partial_signature();
     }
 }
 
@@ -130,6 +119,6 @@ impl<I> Handler<IncomingMessage<Msg<PartialSignature>>> for Signer<I>
             return;
         }
         self.partial_sigs.push(msg.message.body);
-        self.finish_if_possible(ctx);
+        let _ = self.finish_if_possible(ctx);
     }
 }

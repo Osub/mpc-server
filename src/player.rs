@@ -1,26 +1,17 @@
-use std::sync::mpsc::{channel, sync_channel};
 use std::time::Duration;
-use actix::prelude::*;
-use actix_interop::{critical_section, FutureInterop, FutureInteropWrap, StreamInterop, with_ctx};
-use actix_web::body::MessageBody;
-use actix_web::cookie::time::Month::May;
-use actix_web::error::ErrorNotFound;
-use futures::{Sink, SinkExt, StreamExt, TryStream};
-use tokio::time::{self};
-use crate::messages::{Envelope, IncomingMessage, MaybeProceed, OutgoingEnvelope, OutgoingMessage, ProtocolError, ProtocolMessage, ProtocolOutput};
-use round_based::{Msg, StateMachine};
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use anyhow::{Context as AnyhowContext, Error, Result};
-use futures::stream;
-use futures_util::TryStreamExt;
+use actix::prelude::*;
+use round_based::{Msg, StateMachine};
+use serde::Serialize;
+use tokio::time::{self};
+
+use crate::messages::{IncomingMessage, MaybeProceed, OutgoingEnvelope, ProtocolError, ProtocolOutput};
 
 pub struct MpcPlayer<I: Send + Clone + Unpin + 'static, SM, E: Send, O: Send> {
     input: I,
     room: String,
     index: u16,
     msg_count: u16,
-    initial_poller: Option<Box<SpawnHandle>>,
     coordinator: Recipient<ProtocolError<E>>,
     message_broker: Recipient<OutgoingEnvelope>,
     state: SM,
@@ -60,13 +51,12 @@ impl<I, SM> MpcPlayer<I, SM, SM::Err, SM::Output>
             deadline: None,
             current_round: None,
             state,
-            initial_poller: None,
             message_broker,
         }
     }
     fn send_error(&mut self, error: SM::Err) {
         log::debug!("Sending error");
-        self.coordinator.do_send(ProtocolError { error });
+        let _ = self.coordinator.do_send(ProtocolError { error });
     }
 }
 
@@ -119,7 +109,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::Err, SM::Output>
             match serde_json::to_string(&msg) {
                 Ok(serialized) => {
                     log::debug!("Sending message {:?}", serde_json::to_string(&msg));
-                    self.message_broker.do_send(OutgoingEnvelope {
+                    let _ = self.message_broker.do_send(OutgoingEnvelope {
                         room: self.room.clone(),
                         message: serialized,
                     });
@@ -130,7 +120,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::Err, SM::Output>
     }
 
     fn send_result(&mut self, result: SM::Output) {
-        self.result_collector.do_send(ProtocolOutput { input: self.input.clone(), output: result });
+        let _ = self.result_collector.do_send(ProtocolOutput { input: self.input.clone(), output: result });
     }
     fn finish_if_possible(&mut self) {
         if self.state.is_finished() {
@@ -206,7 +196,7 @@ impl<I, SM> Handler<MaybeProceed> for MpcPlayer<I, SM, SM::Err, SM::Output>
             log::debug!("Try to proceed");
             self.maybe_proceed(ctx);
             ctx.run_later(Duration::from_millis(250), |_, _ctx| {
-                _ctx.address().do_send(MaybeProceed {});
+                let _ = _ctx.address().do_send(MaybeProceed {});
             });
         } else {
             log::debug!("Ignore proceed");

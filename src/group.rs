@@ -1,8 +1,6 @@
-use anyhow::Context;
 use round_based::Msg;
-use secp256k1::PublicKey;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use serde::{Serialize, Deserialize};
 
 pub trait MpcGroup {
     fn valid_msg<T>(&self, sender_public_key: &String, msg: &Msg<T>) -> bool;
