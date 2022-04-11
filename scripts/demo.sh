@@ -66,7 +66,7 @@ curl --silent -X POST http://127.0.0.1:8003/keygen \
      -d "${PAYLOAD}"
 
 echo -e "\nWaiting for Keygen to complete"
-sleep 5s
+sleep 5
 
 echo "5. Checking Keygen result"
 pubkey=$(curl --silent -X POST http://127.0.0.1:8001/result/001 | grep -o -w -E '[[:alnum:]]{66}')
