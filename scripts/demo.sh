@@ -76,7 +76,7 @@ echo "Generated pubkey ${pubkey}"
 echo "6. Run Sign"
 
 PAYLOAD=$(cat <<-END
-  { "request_id": "sign-001", "message": "Hello", "participant_public_keys": ["${PK1}", "${PK2}"], "public_key": "${pubkey}"}
+  { "request_id": "sign-001", "message": "7F83B1657FF1FC53B92DC18148A1D65DFC2D4B1FA3D677284ADDD200126D9069", "participant_public_keys": ["${PK1}", "${PK2}"], "public_key": "${pubkey}"}
 END
 )
 curl --silent -X POST http://127.0.0.1:8001/sign \

@@ -364,8 +364,9 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coo
 
     fn handle(&mut self, msg: ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>, ctx: &mut Context<Self>) {
         log::info!("result {:?}", msg.output.public_key());
+        let reqId = msg.input.inner.request_id.clone();
         let do_it = || -> Result<()>{
-            let message = BigInt::from_bytes(msg.input.inner.message.as_bytes());
+            let message = BigInt::from_hex(msg.input.inner.message.as_ref())?;
             let completed_offline_stage = msg.output;
             let input = msg.input.clone();
             let signer = Signer::new(
@@ -389,7 +390,17 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coo
 
             Ok(())
         };
-        let _ = do_it();
+        match do_it() {
+            Ok(_) => {}
+            Err(_) => {
+                let _ = self.tx_res.send(ResponsePayload {
+                    request_id: reqId,
+                    result: None,
+                    request_type: "SIGN".to_owned(),
+                    request_status: "ERROR".to_owned(),
+                });
+            }
+        }
     }
 }
 
@@ -398,21 +409,23 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, SignatureRecid>> for Coordinato
     type Result = ();
 
     fn handle(&mut self, msg: ProtocolOutput<EnrichedSignRequest, SignatureRecid>, _: &mut Context<Self>) {
-        let serialized = serde_json::to_string(&msg).context("serialize signature");
+        let r = hex::encode(msg.output.r.to_bytes().as_ref());
+        let s = hex::encode(msg.output.s.to_bytes().as_ref());
+        let v = hex::encode(msg.output.recid.to_be_bytes().as_ref());
+        let mut sig: String = "0x".to_owned();
 
-        match serialized {
-            Ok(serialized) => {
-                log::info!("Sign request done {:?}", serialized);
-                let request_id = msg.input.inner.request_id.clone();
-                let _ = self.tx_res.send(ResponsePayload {
-                    request_id,
-                    result: Some(serialized),
-                    request_type: "SIGN".to_owned(),
-                    request_status: "DONE".to_owned(),
-                });
-            }
-            Err(_) => {}
-        };
+        sig.push_str(r.as_str());
+        sig.push_str(s.as_str());
+        sig.push_str(v.as_str());
+
+        log::info!("Sign request done {:?} sig: {:?}", msg.input, sig);
+        let request_id = msg.input.inner.request_id.clone();
+        let _ = self.tx_res.send(ResponsePayload {
+            request_id,
+            result: Some(sig),
+            request_type: "SIGN".to_owned(),
+            request_status: "DONE".to_owned(),
+        });
     }
 }
 

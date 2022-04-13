@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use actix::prelude::*;
 use actix_web::{App, HttpResponse, HttpServer, middleware, Responder, web};
 use anyhow::{Context, Result};
+use curv::arithmetic::Converter;
+use curv::BigInt;
 use either::Either;
 use secp256k1::{PublicKey, SecretKey};
 use structopt::StructOpt;
@@ -64,18 +66,25 @@ async fn sign(data: web::Data<AppState>, req: web::Json<SignPayload>) -> impl Re
     if exists_already {
         return HttpResponse::BadRequest().body(format!("A request of id \"{}\" already exists.", req.request_id));
     }
-    let _ = data.tx_res.send(ResponsePayload{
-        request_id: req.0.request_id.clone(),
-        result: None,
-        request_type: "KEYGEN".to_owned(),
-        request_status: "RECEIVED".to_owned(),
-    });
-    match data.tx.send(Either::Right(req.0)) {
+    match  BigInt::from_hex(req.message.as_str()) {
         Ok(_) => {
-            HttpResponse::Ok().body("Request received!")
+            let _ = data.tx_res.send(ResponsePayload{
+                request_id: req.0.request_id.clone(),
+                result: None,
+                request_type: "SIGN".to_owned(),
+                request_status: "RECEIVED".to_owned(),
+            });
+            match data.tx.send(Either::Right(req.0)) {
+                Ok(_) => {
+                    HttpResponse::Ok().body("Request received!")
+                }
+                Err(_) => {
+                    HttpResponse::InternalServerError().body("Failed to queue the request.")
+                }
+            }
         }
         Err(_) => {
-            HttpResponse::InternalServerError().body("Failed to queue the request.")
+            HttpResponse::BadRequest().body("Message is not a valid hash.")
         }
     }
 }
