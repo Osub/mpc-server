@@ -46,7 +46,9 @@ impl PublicKeyGroup {
 impl MpcGroup for PublicKeyGroup {
     fn valid_msg<T>(&self, sender_public_key: &String, msg: &Msg<T>) -> bool {
         let ind = self.get_index(sender_public_key);
-        ind.map_or(false, |i| i == (msg.sender as usize))
+        // ind.map_or(false, |i| i == (msg.sender as usize))
+        // TODO: How do we ensure claimed index is correct?
+        ind.is_some()
     }
 
     fn get_i(&self) -> u16 {

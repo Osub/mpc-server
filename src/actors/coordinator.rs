@@ -279,23 +279,25 @@ impl Handler<SignRequest> for Coordinator {
             request_type: "SIGN".to_owned(),
             request_status: "PROCESSING".to_owned(),
         });
+        let index_in_group = group.get_i();
+        let index_in_s_l = s_l.iter().position(|&x| x == index_in_group).unwrap() as u16 + 1;
 
         let req = EnrichedSignRequest {
             inner: req,
             group_id: group.get_group_id(),
-            i: group.get_i(),
+            i: index_in_s_l,
             s_l: s_l.clone(),
         };
         let s = serde_json::to_string(&local_share.share);
         log::debug!("Local share is {:}", s.unwrap());
-        let state = OfflineStage::new(group.get_i(), s_l, local_share.share);
-        log::debug!("Party index is {:?}", group.get_i());
+        let state = OfflineStage::new(index_in_s_l, s_l, local_share.share);
+        log::debug!("Party index is {:?}", index_in_s_l);
         log::debug!("OfflineStage is {:?}", state);
         let state = state.context("Create state machine")?;
         let player = MpcPlayer::new(
             req.clone(),
             group.get_group_id(),
-            group.get_i(),
+            index_in_s_l,
             state,
             ctx.address().recipient(),
             ctx.address().recipient(),
