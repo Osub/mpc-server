@@ -137,7 +137,7 @@ fn main() -> std::io::Result<()> {
             Ok((incoming, outgoing)) => {
                 let coordinator = Coordinator::new(tx_res1, local_share_db, incoming, outgoing);
                 while let Some(payload) = rx.recv().await {
-                    handle(&coordinator, own_public_key.clone(), payload);
+                    handle(&coordinator, own_public_key.clone(), payload).await;
                 }
             }
             Err(_) => {}

@@ -21,25 +21,40 @@ fn handle_keygen(coordinator: &Addr<Coordinator>, own_public_key: String, payloa
     });
 }
 
-fn handle_sign(coordinator: &Addr<Coordinator>, own_public_key: String, payload: SignPayload) {
+async fn handle_sign(coordinator: &Addr<Coordinator>, own_public_key: String, payload: SignPayload) {
     let SignPayload { request_id, message, public_key, participant_public_keys } = payload;
-    coordinator.do_send(SignRequest {
-        request_id,
+    let res = coordinator.send(SignRequest {
+        request_id: request_id.clone(),
         participant_public_keys,
         public_key,
         message,
         own_public_key: own_public_key.clone(),
-    });
+    }).await;
+    match res {
+        Ok(res) => {
+            match res {
+                Ok(_) => {
+                    log::info!("Request sent {:}", request_id);
+                }
+                Err(e) => {
+                    log::error!("Failed send {:}: {:}", request_id, e);
+                }
+            }
+        }
+        Err(e) => {
+            log::error!("Failed send {:}: {:}", request_id, e);
+        }
+    }
 }
 
-pub fn handle(coordinator: &Addr<Coordinator>, own_public_key: String, payload: Payload) {
+pub async fn handle(coordinator: &Addr<Coordinator>, own_public_key: String, payload: Payload) {
     log::info!("Received request {:?}", payload);
     match payload {
         Either::Left(_) => {
             handle_keygen(coordinator, own_public_key, payload.left().unwrap());
         }
         Either::Right(_) => {
-            handle_sign(coordinator, own_public_key, payload.right().unwrap());
+            handle_sign(coordinator, own_public_key, payload.right().unwrap()).await;
         }
     }
 }

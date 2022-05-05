@@ -286,7 +286,12 @@ impl Handler<SignRequest> for Coordinator {
             i: group.get_i(),
             s_l: s_l.clone(),
         };
-        let state = OfflineStage::new(group.get_i(), s_l, local_share.share).context("Create state machine")?;
+        let s = serde_json::to_string(&local_share.share);
+        log::debug!("Local share is {:}", s.unwrap());
+        let state = OfflineStage::new(group.get_i(), s_l, local_share.share);
+        log::debug!("Party index is {:?}", group.get_i());
+        log::debug!("OfflineStage is {:?}", state);
+        let state = state.context("Create state machine")?;
         let player = MpcPlayer::new(
             req.clone(),
             group.get_group_id(),
