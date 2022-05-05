@@ -66,6 +66,7 @@ pub async fn join_computation(
     let pub_key = PublicKey::from_secret_key(&key);
     let pub_key = Box::new(hex::encode(pub_key.serialize_compressed()));
     let client = SmClient::new(url).context("construct SmClient")?;
+    let own_pub_key = pub_key.as_ref().clone();
 
     // Construct channel of incoming messages
     let incoming = client
@@ -77,8 +78,17 @@ pub async fn join_computation(
                 Ok(msg) => {Some(parse_signed(msg))}
                 Err(_) => {None}
             }
-        });
-
+        })
+        .filter(
+            move |res:&Result<SignedEnvelope<String>>| {
+                futures_util::future::ready(match res {
+                    Ok(envelope) => {
+                        envelope.sender_public_key != own_pub_key
+                    }
+                    Err(_) => { true }
+                })
+            }
+    );
     // Construct channel of outgoing messages
     let outgoing = futures::sink::unfold((client, key, pub_key), |(client, key, pub_key), unsigned: Envelope| async move {
         let signed = sign_envelope(key.as_ref(), pub_key.as_ref(), unsigned).context("Failed to sign")?;
