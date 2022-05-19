@@ -44,7 +44,7 @@ done
 
 # 4. Run Keygen
 echo "Waiting for server to start up"
-sleep 5s
+sleep 5
 
 echo "4. Run Keygen"
 PK1=$(cat tmp/party1/pub.key)
@@ -87,7 +87,7 @@ curl --silent -X POST http://127.0.0.1:8002/sign \
      -d "${PAYLOAD}"
 
 echo -e "\nWaiting for Sign to complete"
-sleep 5s
+sleep 5
 
 echo "7. Checking Sign result"
 curl -X POST http://127.0.0.1:8001/result/sign-001
