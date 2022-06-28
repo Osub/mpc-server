@@ -15,13 +15,14 @@ use futures_util::SinkExt;
 use futures_util::TryStreamExt;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::SignatureRecid;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{Error as KeygenError, Keygen, LocalKey, ProtocolMessage as KeygenProtocolMessage};
-use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{CompletedOfflineStage, Error as OfflineStageError, OfflineProtocolMessage, OfflineStage, PartialSignature};
+use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{CompletedOfflineStage, Error as OfflineStageError, Error, OfflineProtocolMessage, OfflineStage, PartialSignature};
 use round_based::{Msg, StateMachine};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::core::{MpcGroup, PublicKeyGroup, ResponsePayload};
+
 use super::messages::*;
 use super::MpcPlayer;
 use super::Signer;
@@ -52,8 +53,8 @@ struct StoredLocalShare {
 pub struct Coordinator {
     tx_res: UnboundedSender<ResponsePayload>,
     db: sled::Db,
-    keygen_runners: HashMap<String, Addr<MpcPlayer<KeygenRequest, Keygen, <Keygen as StateMachine>::Err, <Keygen as StateMachine>::Output>>>,
-    offline_state_runners: HashMap<String, Addr<MpcPlayer<EnrichedSignRequest, OfflineStage, <OfflineStage as StateMachine>::Err, <OfflineStage as StateMachine>::Output>>>,
+    keygen_runners: HashMap<String, Addr<MpcPlayer<KeygenRequest, Keygen, <Keygen as StateMachine>::MessageBody, <Keygen as StateMachine>::Err, <Keygen as StateMachine>::Output>>>,
+    offline_state_runners: HashMap<String, Addr<MpcPlayer<EnrichedSignRequest, OfflineStage, <OfflineStage as StateMachine>::MessageBody, <OfflineStage as StateMachine>::Err, <OfflineStage as StateMachine>::Output>>>,
     signers: HashMap<String, Addr<Signer<EnrichedSignRequest>>>,
     sink: Option<Pin<Box<dyn Sink<Envelope, Error=anyhow::Error>>>>,
 }
@@ -93,10 +94,9 @@ impl Coordinator {
         Ok(())
     }
 
-    fn handle_incoming_keygen(&mut self, msg: IncomingEnvelope, _: &mut Context<Self>) -> Result<()> {
-        let room = msg.room;
-        let addr = self.keygen_runners.get(&room).context("Can't found mpc player.")?;
-        let msg = serde_json::from_str::<Msg<KeygenProtocolMessage>>(&msg.message).context("deserialize message")?;
+    fn handle_incoming_keygen(&mut self, room: &String, message: &String, _: &mut Context<Self>) -> Result<()> {
+        let addr = self.keygen_runners.get(room).context("Can't found mpc player.")?;
+        let msg = serde_json::from_str::<Msg<KeygenProtocolMessage>>(message).context("deserialize message")?;
         let _ = addr.do_send(IncomingMessage {
             room: room.clone(),
             message: msg,
@@ -104,10 +104,9 @@ impl Coordinator {
         Ok(())
     }
 
-    fn handle_incoming_offline(&mut self, msg: IncomingEnvelope, _: &mut Context<Self>) -> Result<()> {
-        let room = msg.room;
-        let addr = self.offline_state_runners.get(&room).context("Not found mpc player.")?;
-        let msg = serde_json::from_str::<Msg<OfflineProtocolMessage>>(&msg.message).context("deserialize message")?;
+    fn handle_incoming_offline(&mut self, room: &String, message: &String, _: &mut Context<Self>) -> Result<()> {
+        let addr = self.offline_state_runners.get(room).context("Not found mpc player.")?;
+        let msg = serde_json::from_str::<Msg<OfflineProtocolMessage>>(message).context("deserialize message")?;
         let _ = addr.do_send(IncomingMessage {
             room: room.clone(),
             message: msg,
@@ -116,10 +115,9 @@ impl Coordinator {
         Ok(())
     }
 
-    fn handle_incoming_sign(&mut self, msg: IncomingEnvelope, _: &mut Context<Self>) -> Result<()> {
-        let room = msg.room;
-        let addr = self.signers.get(&room).context("Not found signer.")?;
-        let msg = serde_json::from_str::<Msg<PartialSignature>>(&msg.message).context("deserialize message")?;
+    fn handle_incoming_sign(&mut self, room: &String, message: &String, _: &mut Context<Self>) -> Result<()> {
+        let addr = self.signers.get(room).context("Not found signer.")?;
+        let msg = serde_json::from_str::<Msg<PartialSignature>>(message).context("deserialize message")?;
         addr.do_send(IncomingMessage {
             room: room.clone(),
             message: msg,
@@ -127,21 +125,28 @@ impl Coordinator {
         Ok(())
     }
 
+    fn retry(&mut self, envelope: RetryEnvelope, ctx: &mut Context<Self>) {
+        ctx.run_later(Duration::from_secs(1), move |_, _ctx| {
+            _ctx.notify(envelope);
+        });
+    }
+
+    fn handle_incoming_unsafe(&mut self, room: String, message: String, ctx: &mut Context<Self>) {
+        let h1 = self.handle_incoming_offline(&room, &message, ctx);
+        let h2 = self.handle_incoming_sign(&room, &message, ctx);
+        let h3 = self.handle_incoming_keygen(&room, &message,ctx);
+        if h1.or(h2).or(h3).is_err() {
+            self.retry(RetryEnvelope {
+                room,
+                message,
+            }, ctx);
+        }
+    }
+
     fn handle_incoming(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) {
         match self.valid_sender(msg.clone()) {
             Ok(()) => {
-                let h1 = self.handle_incoming_offline(msg.clone(), ctx);
-                let h2 = self.handle_incoming_sign(msg.clone(), ctx);
-                let h3 = self.handle_incoming_keygen(msg.clone(), ctx);
-                if h1.or(h2).or(h3).is_err() {
-                    ctx.run_later(Duration::from_secs(1), move |_, _ctx| {
-                        _ctx.notify(RetryEnvelope {
-                            room: msg.room.clone(),
-                            message: msg.message.clone(),
-                            sender_public_key: msg.sender_public_key.clone(),
-                        });
-                    });
-                }
+                self.handle_incoming_unsafe(msg.room, msg.message, ctx);
             }
             Err(_) => {
                 log::debug!("Not valid sender.")
@@ -308,19 +313,39 @@ impl Handler<SignRequest> for Coordinator {
     }
 }
 
-impl Handler<ProtocolError<KeygenError>> for Coordinator {
+impl Handler<ProtocolError<KeygenError, Msg<KeygenProtocolMessage>>> for Coordinator {
     type Result = ();
 
-    fn handle(&mut self, msg: ProtocolError<KeygenError>, _: &mut Context<Self>) {
+    fn handle(&mut self, msg: ProtocolError<KeygenError, Msg<KeygenProtocolMessage>>, ctx: &mut Context<Self>) {
         log::info!("Error {:?}", msg.error);
+        match msg.error {
+            KeygenError::ReceivedOutOfOrderMessage{current_round: _, msg_round:_ } => {
+                let message = serde_json::to_string(&msg.message).unwrap();
+                self.retry(RetryEnvelope {
+                    room: msg.room,
+                    message,
+                }, ctx);
+            }
+            _ => {}
+        }
     }
 }
 
-impl Handler<ProtocolError<OfflineStageError>> for Coordinator {
+impl Handler<ProtocolError<OfflineStageError, Msg<OfflineProtocolMessage>>> for Coordinator {
     type Result = ();
 
-    fn handle(&mut self, msg: ProtocolError<OfflineStageError>, _: &mut Context<Self>) {
+    fn handle(&mut self, msg: ProtocolError<OfflineStageError, Msg<OfflineProtocolMessage>>, ctx: &mut Context<Self>) {
         log::info!("Error {:?}", msg.error);
+        match msg.error {
+            OfflineStageError::ReceivedOutOfOrderMessage{current_round: _, msg_round:_ } => {
+                let message = serde_json::to_string(&msg.message).unwrap();
+                self.retry(RetryEnvelope {
+                    room: msg.room,
+                    message,
+                }, ctx);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -451,10 +476,6 @@ impl Handler<RetryEnvelope> for Coordinator
     type Result = ();
 
     fn handle(&mut self, msg: RetryEnvelope, ctx: &mut Context<Self>) {
-        self.handle_incoming(IncomingEnvelope {
-            room: msg.room,
-            message: msg.message,
-            sender_public_key: msg.sender_public_key,
-        }, ctx);
+        self.handle_incoming_unsafe(msg.room, msg.message, ctx);
     }
 }

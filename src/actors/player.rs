@@ -7,12 +7,12 @@ use tokio::time::{self};
 
 use super::messages::{IncomingMessage, MaybeProceed, OutgoingEnvelope, ProtocolError, ProtocolOutput};
 
-pub struct MpcPlayer<I: Send + Clone + Unpin + 'static, SM, E: Send, O: Send> {
+pub struct MpcPlayer<I: Send + Clone + Unpin + 'static, SM, M: Send, E: Send, O: Send> {
     input: I,
     room: String,
     index: u16,
     msg_count: u16,
-    coordinator: Recipient<ProtocolError<E>>,
+    coordinator: Recipient<ProtocolError<E, Msg<M>>>,
     message_broker: Recipient<OutgoingEnvelope>,
     state: SM,
     deadline: Option<time::Instant>,
@@ -20,13 +20,13 @@ pub struct MpcPlayer<I: Send + Clone + Unpin + 'static, SM, E: Send, O: Send> {
     result_collector: Recipient<ProtocolOutput<I, O>>,
 }
 
-impl<I, SM> MpcPlayer<I, SM, SM::Err, SM::Output>
+impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
     where
         I: Send + Clone + Unpin + 'static,
         SM: StateMachine + Unpin,
         SM::Err: Send,
         SM: Send + 'static,
-        SM::MessageBody: Send + Serialize,
+        SM::MessageBody: Send + Serialize + Clone,
         SM::Output: Send,
 {
     pub fn new(
@@ -34,7 +34,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::Err, SM::Output>
         room: String,
         index: u16,
         state: SM,
-        coordinator: Recipient<ProtocolError<SM::Err>>,
+        coordinator: Recipient<ProtocolError<SM::Err, Msg<SM::MessageBody>>>,
         result_collector: Recipient<ProtocolOutput<I, SM::Output>>,
         message_broker: Recipient<OutgoingEnvelope>,
     ) -> Self
@@ -54,19 +54,19 @@ impl<I, SM> MpcPlayer<I, SM, SM::Err, SM::Output>
             message_broker,
         }
     }
-    fn send_error(&mut self, error: SM::Err) {
+    fn send_error(&mut self, error: SM::Err, message: Msg<SM::MessageBody>) {
         log::debug!("Sending error");
-        let _ = self.coordinator.do_send(ProtocolError { error });
+        let _ = self.coordinator.do_send(ProtocolError { room: self.room.clone(), error, message });
     }
 }
 
-impl<I, SM> Actor for MpcPlayer<I, SM, SM::Err, SM::Output>
+impl<I, SM> Actor for MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
     where
         I: Send + Clone + Unpin + 'static,
         SM: StateMachine + Unpin,
         SM::Err: Send,
         SM: Send + 'static,
-        SM::MessageBody: Send + Serialize,
+        SM::MessageBody: Send + Serialize + Clone,
         SM::Output: Send,
 {
     type Context = Context<Self>;
@@ -75,28 +75,27 @@ impl<I, SM> Actor for MpcPlayer<I, SM, SM::Err, SM::Output>
     }
 }
 
-impl<I, SM> MpcPlayer<I, SM, SM::Err, SM::Output>
+impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
     where
         I: Send + Clone + Unpin + 'static,
         SM: StateMachine + Unpin,
         SM::Err: Send,
         SM: Send + 'static,
-        SM::MessageBody: Send + Serialize,
+        SM::MessageBody: Send + Serialize + Clone,
         SM::Output: Send,
 {
     fn handle_incoming(&mut self, msg: Msg<SM::MessageBody>) {
-        match self.state.handle_incoming(msg) {
+        match self.state.handle_incoming(msg.clone()) {
             Ok(()) => {}
-            Err(e) => { self.send_error(e) }
+            Err(e) => { self.send_error(e, msg) }
         }
     }
 
-    fn proceed_if_needed(&mut self) {
+    fn proceed_if_needed(&mut self) -> Result<(), SM::Err> {
         if self.state.wants_to_proceed() {
-            match self.state.proceed() {
-                Ok(()) => {}
-                Err(e) => { self.send_error(e) }
-            }
+            self.state.proceed()
+        } else {
+            Ok(())
         }
     }
 
@@ -122,13 +121,18 @@ impl<I, SM> MpcPlayer<I, SM, SM::Err, SM::Output>
     fn send_result(&mut self, result: SM::Output) {
         let _ = self.result_collector.do_send(ProtocolOutput { input: self.input.clone(), output: result });
     }
-    fn finish_if_possible(&mut self) {
+    fn finish_if_possible(&mut self) -> Result<(), SM::Err> {
         if self.state.is_finished() {
             match self.state.pick_output() {
-                Some(Ok(result)) => { self.send_result(result); }
-                Some(Err(err)) => { self.send_error(err); }
-                None => {}
+                Some(Ok(result)) => {
+                    self.send_result(result);
+                    Ok(())
+                }
+                Some(Err(e)) => { Err(e) }
+                None => { Ok(()) }
             }
+        } else {
+            Ok(())
         }
     }
 
@@ -144,25 +148,29 @@ impl<I, SM> MpcPlayer<I, SM, SM::Err, SM::Output>
     }
 
 
-    fn maybe_proceed(&mut self, ctx: &mut Context<Self>) {
+    fn maybe_proceed(&mut self, ctx: &mut Context<Self>) -> Result<(), SM::Err> {
         self.send_outgoing(ctx);
         self.refresh_timer();
 
-        self.proceed_if_needed();
+        match self.proceed_if_needed() {
+            Ok(()) => {}
+            Err(e) => { return Err(e); }
+        }
         self.send_outgoing(ctx);
         self.refresh_timer();
         self.finish_if_possible();
+        Ok(())
     }
 }
 
 
-impl<I, SM> Handler<IncomingMessage<Msg<SM::MessageBody>>> for MpcPlayer<I, SM, SM::Err, SM::Output>
+impl<I, SM> Handler<IncomingMessage<Msg<SM::MessageBody>>> for MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
     where
         I: Send + Clone + Unpin + 'static,
         SM: StateMachine + Unpin,
         SM::Err: Send,
         SM: Send + 'static,
-        SM::MessageBody: Send + Serialize,
+        SM::MessageBody: Send + Serialize + Clone,
         SM::Output: Send,
 {
     type Result = ();
@@ -174,19 +182,24 @@ impl<I, SM> Handler<IncomingMessage<Msg<SM::MessageBody>>> for MpcPlayer<I, SM, 
         log::debug!("Round before: {}", self.state.current_round());
         log::debug!("Received message {:?}", serde_json::to_string(&msg.message));
         self.msg_count += 1;
-        self.handle_incoming(msg.message);
-        self.maybe_proceed(ctx);
+        self.handle_incoming(msg.message.clone());
+        match self.maybe_proceed(ctx) {
+            Err(e) => {
+                self.send_error(e, msg.message)
+            }
+            _ => {}
+        }
         log::debug!("Round after: {}", self.state.current_round());
     }
 }
 
-impl<I, SM> Handler<MaybeProceed> for MpcPlayer<I, SM, SM::Err, SM::Output>
+impl<I, SM> Handler<MaybeProceed> for MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
     where
         I: Send + Clone + Unpin + 'static,
         SM: StateMachine + Unpin,
         SM::Err: Send,
         SM: Send + 'static,
-        SM::MessageBody: Send + Serialize,
+        SM::MessageBody: Send + Serialize + Clone,
         SM::Output: Send,
 {
     type Result = ();

@@ -62,7 +62,6 @@ pub struct SignedEnvelope<S> {
 pub struct RetryEnvelope {
     pub room: String,
     pub message: String,
-    pub sender_public_key: String,
 }
 
 #[derive(Message, Serialize, Deserialize, Clone)]
@@ -96,7 +95,7 @@ pub struct ProtocolMessageAck {
 
 #[derive(Message)]
 #[rtype(result = "()")]
-pub struct IncomingMessage<M> {
+pub struct IncomingMessage<M: Clone> {
     pub room: String,
     pub message: M,
 }
@@ -110,8 +109,10 @@ pub struct OutgoingMessage<M> {
 
 #[derive(Message)]
 #[rtype(result = "()")]
-pub struct ProtocolError<M> {
-    pub error: M,
+pub struct ProtocolError<E, M> {
+    pub room: String,
+    pub error: E,
+    pub message: M,
 }
 
 #[derive(Message, Serialize, Deserialize, Clone)]
