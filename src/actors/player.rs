@@ -181,6 +181,15 @@ impl<I, SM> Handler<IncomingMessage<Msg<SM::MessageBody>>> for MpcPlayer<I, SM, 
         }
         log::debug!("Round before: {}", self.state.current_round());
         log::debug!("Received message {:?}", serde_json::to_string(&msg.message));
+        let valid_receiver = match msg.message.receiver {
+            Some(i) if i != self.index => { false }
+            _ => { true }
+        };
+        if !valid_receiver {
+            // TODO: Is this necessary? Other option is let state machine take the message and throw error.
+            log::debug!("The message is not addressed to me. {} {}", msg.message.receiver.unwrap(), self.index);
+            return;
+        }
         self.msg_count += 1;
         self.handle_incoming(msg.message.clone());
         match self.maybe_proceed(ctx) {
