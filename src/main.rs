@@ -167,7 +167,7 @@ fn main() -> std::io::Result<()> {
                 .route("/sign", web::post().to(sign))
                 .route("/result/{request_id}", web::post().to(result))
         })
-            .bind(("127.0.0.1", args.port))
+            .bind((args.address, args.port))
             .unwrap()
             .run()
     };

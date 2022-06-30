@@ -1,17 +1,17 @@
 use std::collections::hash_map::{Entry, HashMap};
+use std::net::IpAddr;
 use std::sync::{
-    atomic::{AtomicU16, Ordering},
     Arc,
+    atomic::{AtomicU16, Ordering},
 };
 
 use futures::Stream;
 use rocket::data::ToByteUnit;
 use rocket::http::Status;
 use rocket::request::{FromRequest, Outcome, Request};
-use rocket::response::stream::{stream, Event, EventStream};
-use rocket::serde::json::Json;
+use rocket::response::stream::{Event, EventStream, stream};
 use rocket::State;
-use serde::{Deserialize, Serialize};
+use structopt::StructOpt;
 use tokio::sync::{Notify, RwLock};
 
 static ROOM_ID: &str = "---default---";
@@ -21,7 +21,7 @@ async fn subscribe(
     db: &State<Db>,
     mut shutdown: rocket::Shutdown,
     last_seen_msg: LastEventId,
-) -> EventStream<impl Stream<Item = Event>> {
+) -> EventStream<impl Stream<Item=Event>> {
     let room = db.get_room_or_create_empty(ROOM_ID).await;
     let mut subscription = room.subscribe(last_seen_msg.0);
     EventStream::from(stream! {
@@ -168,11 +168,29 @@ impl<'r> FromRequest<'r> for LastEventId {
     }
 }
 
+
+#[derive(StructOpt, Debug)]
+pub struct Cli {
+    #[structopt(short, long, default_value = "127.0.0.1")]
+    pub address: IpAddr,
+
+    #[structopt(short, long, default_value = "8000")]
+    pub port: u16,
+}
+
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Cli = Cli::from_args();
     let figment = rocket::Config::figment().merge((
         "limits",
         rocket::data::Limits::new().limit("string", 100.megabytes()),
+    )).merge((
+        "address",
+        args.address
+    )).merge((
+        "port",
+        args.port
     ));
     rocket::custom(figment)
         .mount("/", rocket::routes![subscribe, broadcast])
