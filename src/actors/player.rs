@@ -1,5 +1,5 @@
 use std::time::Duration;
-
+use std::fmt::Debug;
 use actix::prelude::*;
 use round_based::{Msg, StateMachine};
 use serde::Serialize;
@@ -23,7 +23,7 @@ pub struct MpcPlayer<I: Send + Clone + Unpin + 'static, SM, M: Send, E: Send, O:
 impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
     where
         I: Send + Clone + Unpin + 'static,
-        SM: StateMachine + Unpin,
+        SM: StateMachine + Debug + Unpin,
         SM::Err: Send,
         SM: Send + 'static,
         SM::MessageBody: Send + Serialize + Clone,
@@ -39,7 +39,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         message_broker: Recipient<OutgoingEnvelope>,
     ) -> Self
         where
-            SM: StateMachine + Unpin,
+            SM: StateMachine + Debug + Unpin,
     {
         Self {
             input,
@@ -63,7 +63,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
 impl<I, SM> Actor for MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
     where
         I: Send + Clone + Unpin + 'static,
-        SM: StateMachine + Unpin,
+        SM: StateMachine + Debug + Unpin,
         SM::Err: Send,
         SM: Send + 'static,
         SM::MessageBody: Send + Serialize + Clone,
@@ -78,7 +78,7 @@ impl<I, SM> Actor for MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
 impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
     where
         I: Send + Clone + Unpin + 'static,
-        SM: StateMachine + Unpin,
+        SM: StateMachine + Debug + Unpin,
         SM::Err: Send,
         SM: Send + 'static,
         SM::MessageBody: Send + Serialize + Clone,
@@ -86,8 +86,13 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
 {
     fn handle_incoming(&mut self, msg: Msg<SM::MessageBody>) {
         match self.state.handle_incoming(msg.clone()) {
-            Ok(()) => {}
-            Err(e) => { self.send_error(e, msg) }
+            Ok(()) => {
+                log::debug!("Handle Ok State: {:?}", self.state);
+            }
+            Err(e) => {
+                log::debug!("Handle Err State: {:?}", self.state);
+                self.send_error(e, msg)
+            }
         }
     }
 
@@ -167,7 +172,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
 impl<I, SM> Handler<IncomingMessage<Msg<SM::MessageBody>>> for MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
     where
         I: Send + Clone + Unpin + 'static,
-        SM: StateMachine + Unpin,
+        SM: StateMachine + Debug + Unpin,
         SM::Err: Send,
         SM: Send + 'static,
         SM::MessageBody: Send + Serialize + Clone,
@@ -205,7 +210,7 @@ impl<I, SM> Handler<IncomingMessage<Msg<SM::MessageBody>>> for MpcPlayer<I, SM, 
 impl<I, SM> Handler<MaybeProceed> for MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
     where
         I: Send + Clone + Unpin + 'static,
-        SM: StateMachine + Unpin,
+        SM: StateMachine + Debug + Unpin,
         SM::Err: Send,
         SM: Send + 'static,
         SM::MessageBody: Send + Serialize + Clone,
