@@ -134,7 +134,14 @@ impl Coordinator {
     fn handle_incoming_unsafe(&mut self, room: String, message: String, ctx: &mut Context<Self>) {
         let h1 = self.handle_incoming_offline(&room, &message, ctx);
         let h2 = self.handle_incoming_sign(&room, &message, ctx);
-        let h3 = self.handle_incoming_keygen(&room, &message,ctx);
+        let h3 = self.handle_incoming_keygen(&room, &message, ctx);
+        let handled_by = match (h1.is_ok(), h2.is_ok(), h3.is_ok()) {
+            (true, _, _) => { "offline" }
+            (_, true, _) => { "sign" }
+            (_, _, true) => { "keygen" }
+            _ => { "none" }
+        };
+        log::debug!("Coordinator routing message (handled by {}): {}", handled_by, message);
         if h1.or(h2).or(h3).is_err() {
             self.retry(RetryEnvelope {
                 room,
@@ -319,7 +326,7 @@ impl Handler<ProtocolError<KeygenError, Msg<KeygenProtocolMessage>>> for Coordin
     fn handle(&mut self, msg: ProtocolError<KeygenError, Msg<KeygenProtocolMessage>>, ctx: &mut Context<Self>) {
         log::info!("Error {:?}", msg.error);
         match msg.error {
-            KeygenError::ReceivedOutOfOrderMessage{current_round: _, msg_round:_ } => {
+            KeygenError::ReceivedOutOfOrderMessage { current_round: _, msg_round: _ } => {
                 let message = serde_json::to_string(&msg.message).unwrap();
                 self.retry(RetryEnvelope {
                     room: msg.room,
@@ -337,7 +344,7 @@ impl Handler<ProtocolError<OfflineStageError, Msg<OfflineProtocolMessage>>> for 
     fn handle(&mut self, msg: ProtocolError<OfflineStageError, Msg<OfflineProtocolMessage>>, ctx: &mut Context<Self>) {
         log::info!("Error {:?}", msg.error);
         match msg.error {
-            OfflineStageError::ReceivedOutOfOrderMessage{current_round: _, msg_round:_ } => {
+            OfflineStageError::ReceivedOutOfOrderMessage { current_round: _, msg_round: _ } => {
                 let message = serde_json::to_string(&msg.message).unwrap();
                 self.retry(RetryEnvelope {
                     room: msg.room,
