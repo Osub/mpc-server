@@ -41,6 +41,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         where
             SM: StateMachine + Debug + Unpin,
     {
+        log::debug!("Player room {}", &room);
         Self {
             input,
             room,

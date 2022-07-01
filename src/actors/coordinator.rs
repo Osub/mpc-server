@@ -33,6 +33,8 @@ enum GroupError {
     WrongPublicKey,
     #[error("Some of the public keys don't belong to the group.")]
     WrongPublicKeys,
+    #[error("Cannot parse the group id.")]
+    FailedToParseGroupId,
 }
 
 #[derive(Debug, Error)]
@@ -88,8 +90,12 @@ impl Coordinator {
     }
 
     fn valid_sender(&mut self, msg: IncomingEnvelope) -> Result<()> {
-        let room = msg.room;
-        let group = self.retrieve_group(room.clone()).context("Retrieve group.")?;
+        let split = msg.room.split("@").collect::<Vec<&str>>();
+        if split.len() < 2 {
+            return Err(GroupError::FailedToParseGroupId.into());
+        }
+        let group_id = split[1];
+        let group = self.retrieve_group(group_id.to_string()).context("Retrieve group.")?;
         group.get_index(&msg.sender_public_key).map_or(Err(GroupError::WrongPublicKey), |_| Ok(())).context("Validate sender.")?;
         Ok(())
     }
@@ -249,7 +255,7 @@ impl Handler<KeygenRequest> for Coordinator {
         let state = Keygen::new(group.get_i(), group.get_t(), group.get_n()).context("Create state machine")?;
         let player = MpcPlayer::new(
             req.clone(),
-            group_id.clone(),
+            room.clone(),
             group.get_i(),
             state,
             ctx.address().recipient(),

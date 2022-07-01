@@ -34,7 +34,8 @@ done
 
 # 2. Start messenger
 echo "2. Starting messenger"
-$SCRIPT_DIR/../messenger/target/debug/messenger &>/dev/null &
+mkdir -p $SCRIPT_DIR/../tmp/messenger
+$SCRIPT_DIR/../messenger/target/debug/messenger > $SCRIPT_DIR/../tmp/messenger/log.txt 2>&1 &
 
 # 3. Start MPC Servers
 echo "3. Starting MPC Servers"
