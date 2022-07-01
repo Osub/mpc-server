@@ -29,7 +29,7 @@ pub struct SignRequest {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct EnrichedSignRequest {
     pub inner: SignRequest,
-    pub group_id: String,
+    pub room: String,
     pub i: u16,
     pub s_l: Vec<u16>,
 }

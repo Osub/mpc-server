@@ -141,7 +141,7 @@ impl Coordinator {
             (_, _, true) => { "keygen" }
             _ => { "none" }
         };
-        log::debug!("Coordinator routing message (handled by {}): {}", handled_by, message);
+        log::debug!("Coordinator routing message (handled by {}): {} {}", handled_by, room, message);
         if h1.or(h2).or(h3).is_err() {
             self.retry(RetryEnvelope {
                 room,
@@ -244,6 +244,7 @@ impl Handler<KeygenRequest> for Coordinator {
         });
         let group = PublicKeyGroup::new(public_keys, t, own_public_key);
         let group_id = group.get_group_id();
+        let room = req.request_id.clone() + "@" + group_id.clone().as_str();
 
         let state = Keygen::new(group.get_i(), group.get_t(), group.get_n()).context("Create state machine")?;
         let player = MpcPlayer::new(
@@ -256,7 +257,7 @@ impl Handler<KeygenRequest> for Coordinator {
             ctx.address().recipient(),
         ).start();
         let _ = self.save_group(group.clone());
-        self.keygen_runners.insert(group_id.clone(), player);
+        self.keygen_runners.insert(room, player);
         Ok(())
     }
 }
@@ -293,10 +294,12 @@ impl Handler<SignRequest> for Coordinator {
         });
         let index_in_group = group.get_i();
         let index_in_s_l = s_l.iter().position(|&x| x == index_in_group).unwrap() as u16 + 1;
+        let group_id = group.get_group_id();
+        let room = req.request_id.clone() + "@" + group_id.clone().as_str();
 
         let req = EnrichedSignRequest {
             inner: req,
-            group_id: group.get_group_id(),
+            room: room.clone(),
             i: index_in_s_l,
             s_l: s_l.clone(),
         };
@@ -308,14 +311,14 @@ impl Handler<SignRequest> for Coordinator {
         let state = state.context("Create state machine")?;
         let player = MpcPlayer::new(
             req.clone(),
-            group.get_group_id(),
+            room.clone(),
             index_in_s_l,
             state,
             ctx.address().recipient(),
             ctx.address().recipient(),
             ctx.address().recipient(),
         ).start();
-        self.offline_state_runners.insert(group.get_group_id(), player);
+        self.offline_state_runners.insert(room, player);
         Ok(())
     }
 }
@@ -410,7 +413,7 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coo
             let input = msg.input.clone();
             let signer = Signer::new(
                 input.clone(),
-                input.group_id,
+                input.room,
                 input.i,
                 input.s_l.len() - 1,
                 message,
@@ -418,7 +421,7 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coo
                 ctx.address().recipient(),
                 ctx.address().recipient(),
             ).start();
-            self.signers.insert(msg.input.group_id.to_owned(), signer);
+            self.signers.insert(msg.input.room.to_owned(), signer);
             let request_id = msg.input.inner.request_id.clone();
             let _ = self.tx_res.send(ResponsePayload {
                 request_id,
