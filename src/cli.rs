@@ -17,6 +17,9 @@ pub struct Cli {
     #[structopt(short, long)]
     pub secret_key_path: PathBuf,
 
+    #[structopt(long)]
+    pub password: String,
+
     #[structopt(short, long)]
     pub db_path: PathBuf,
 }

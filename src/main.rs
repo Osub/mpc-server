@@ -17,11 +17,13 @@ use cli::Cli;
 use crate::actors::{Coordinator, handle};
 use crate::core::{KeygenPayload, Payload, ResponsePayload, SignPayload};
 use crate::transport::join_computation;
+use crate::key::decrypt;
 
 mod core;
 mod actors;
 mod cli;
 mod transport;
+mod key;
 
 
 struct AppState {
@@ -109,11 +111,13 @@ async fn result(data: web::Data<AppState>, request_id: web::Path<String>) -> imp
     }
 }
 
-fn get_secret_key(path: PathBuf) -> Result<(SecretKey, PublicKey)> {
+fn get_secret_key(path: PathBuf, password: String) -> Result<(SecretKey, PublicKey)> {
     let sk_hex = std::fs::read_to_string(path).context("Read secret key file.")?;
     let sk_bytes = hex::decode(sk_hex).context("Decode hex secret key.")?;
 
-    let sk = SecretKey::parse_slice(sk_bytes.as_slice()).context("Parse secret key.")?;
+    let sk = decrypt(password.as_bytes(), sk_bytes.as_slice())?;
+
+    let sk = SecretKey::parse_slice(sk.as_slice()).context("Parse secret key.")?;
     let pk = PublicKey::from_secret_key(&sk);
     Ok((sk, pk))
 }
@@ -125,7 +129,7 @@ fn main() -> std::io::Result<()> {
     let (tx, mut rx) = unbounded_channel::<Payload>();
     let (tx_res, mut rx_res) = unbounded_channel::<ResponsePayload>();
     let sys = actix::System::new();
-    let (sk, pk) = get_secret_key(args.secret_key_path.clone()).context("Can't find secret key path.").unwrap();
+    let (sk, pk) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't find secret key path.").unwrap();
     let own_public_key = hex::encode(pk.serialize_compressed());
     let results_path = args.db_path.join("results");
     let results_db: sled::Db = sled::open(results_path).unwrap();
