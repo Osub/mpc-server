@@ -144,9 +144,6 @@ impl Coordinator {
     }
 
     fn handle_incoming_unsafe(&mut self, room: String, message: String, init_ts: u128, attempts: u16, ctx: &mut Context<Self>) {
-        let since_the_epoch = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards").as_millis();
 
         let h1 = self.handle_incoming_offline(&room, &message, ctx);
         let h2 = self.handle_incoming_sign(&room, &message, ctx);
