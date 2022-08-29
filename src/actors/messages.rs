@@ -62,6 +62,8 @@ pub struct SignedEnvelope<S> {
 pub struct RetryEnvelope {
     pub room: String,
     pub message: String,
+    pub initial_timestamp: u128,
+    pub attempts: u16,
 }
 
 #[derive(Message, Serialize, Deserialize, Clone)]
