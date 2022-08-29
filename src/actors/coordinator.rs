@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::ops::Deref;
 use std::pin::Pin;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use actix::prelude::*;
 use actix_interop::{critical_section, FutureInterop, with_ctx};
@@ -132,12 +132,20 @@ impl Coordinator {
     }
 
     fn retry(&mut self, envelope: RetryEnvelope, ctx: &mut Context<Self>) {
-        ctx.run_later(Duration::from_secs(1), move |_, _ctx| {
-            _ctx.notify(envelope);
-        });
+        if envelope.attempts > 5 {
+            log::error!("reached max retries for message: {}", envelope.message);
+        } else {
+            ctx.run_later(Duration::from_secs(2_u32.pow(envelope.attempts as u32) as u64), move |_, _ctx| {
+                _ctx.notify(envelope);
+            });
+        }
     }
 
-    fn handle_incoming_unsafe(&mut self, room: String, message: String, ctx: &mut Context<Self>) {
+    fn handle_incoming_unsafe(&mut self, room: String, message: String, init_ts: u128, attempts: u16, ctx: &mut Context<Self>) {
+        let since_the_epoch = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards").as_millis();
+
         let h1 = self.handle_incoming_offline(&room, &message, ctx);
         let h2 = self.handle_incoming_sign(&room, &message, ctx);
         let h3 = self.handle_incoming_keygen(&room, &message, ctx);
@@ -152,6 +160,8 @@ impl Coordinator {
             self.retry(RetryEnvelope {
                 room,
                 message,
+                initial_timestamp: current_timestamp(),
+                attempts: attempts+1,
             }, ctx);
         }
     }
@@ -159,7 +169,7 @@ impl Coordinator {
     fn handle_incoming(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) {
         match self.valid_sender(msg.clone()) {
             Ok(()) => {
-                self.handle_incoming_unsafe(msg.room, msg.message, ctx);
+                self.handle_incoming_unsafe(msg.room, msg.message, current_timestamp(), 0, ctx);
             }
             Err(_) => {
                 log::debug!("Not valid sender.")
@@ -340,6 +350,8 @@ impl Handler<ProtocolError<KeygenError, Msg<KeygenProtocolMessage>>> for Coordin
                 self.retry(RetryEnvelope {
                     room: msg.room,
                     message,
+                    initial_timestamp: current_timestamp(),
+                    attempts: 1,
                 }, ctx);
             }
             _ => {}
@@ -358,6 +370,8 @@ impl Handler<ProtocolError<OfflineStageError, Msg<OfflineProtocolMessage>>> for 
                 self.retry(RetryEnvelope {
                     room: msg.room,
                     message,
+                    initial_timestamp: current_timestamp(),
+                    attempts: 1,
                 }, ctx);
             }
             _ => {}
@@ -492,6 +506,12 @@ impl Handler<RetryEnvelope> for Coordinator
     type Result = ();
 
     fn handle(&mut self, msg: RetryEnvelope, ctx: &mut Context<Self>) {
-        self.handle_incoming_unsafe(msg.room, msg.message, ctx);
+        self.handle_incoming_unsafe(msg.room, msg.message, msg.initial_timestamp, msg.attempts, ctx);
     }
+}
+
+fn current_timestamp() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards").as_millis()
 }
