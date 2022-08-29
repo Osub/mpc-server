@@ -298,7 +298,7 @@ impl Handler<SignRequest> for Coordinator {
         ).collect();
         let (indices, errors): (Vec<Option<usize>>, Vec<_>) = indices.into_iter().partition(Option::is_some);
 
-        let s_l: Vec<u16> = if indices.len() != (local_share.share.t + 1) {
+        let s_l: Vec<u16> = if indices.len() != (local_share.share.t + 1) as usize {
             Err(GroupError::WrongNumberOfParticipants)
         } else if errors.len() != 0 {
             Err(GroupError::WrongPublicKeys)
