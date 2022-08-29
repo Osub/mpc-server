@@ -35,6 +35,8 @@ enum GroupError {
     WrongPublicKeys,
     #[error("Cannot parse the group id.")]
     FailedToParseGroupId,
+    #[error("The required number of participants is not met.")]
+    WrongNumberOfParticipants,
 }
 
 #[derive(Debug, Error)]
@@ -161,7 +163,7 @@ impl Coordinator {
                 room,
                 message,
                 initial_timestamp: current_timestamp(),
-                attempts: attempts+1,
+                attempts: attempts + 1,
             }, ctx);
         }
     }
@@ -296,10 +298,12 @@ impl Handler<SignRequest> for Coordinator {
         ).collect();
         let (indices, errors): (Vec<Option<usize>>, Vec<_>) = indices.into_iter().partition(Option::is_some);
 
-        let s_l: Vec<u16> = if errors.len() == 0 {
-            Ok(indices.into_iter().map(|o| o.expect("Index") as u16).collect())
-        } else {
+        let s_l: Vec<u16> = if indices.len() != (local_share.share.t + 1) as usize {
+            Err(GroupError::WrongNumberOfParticipants)
+        } else if errors.len() != 0 {
             Err(GroupError::WrongPublicKeys)
+        } else {
+            Ok(indices.into_iter().map(|o| o.expect("Index") as u16).collect())
         }.context("Find index of participants")?;
 
         let _ = self.tx_res.send(ResponsePayload {
