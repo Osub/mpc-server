@@ -162,7 +162,7 @@ impl Coordinator {
             self.retry(RetryEnvelope {
                 room,
                 message,
-                initial_timestamp: current_timestamp(),
+                initial_timestamp: init_ts,
                 attempts: attempts + 1,
             }, ctx);
         }
