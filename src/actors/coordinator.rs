@@ -144,9 +144,6 @@ impl Coordinator {
     }
 
     fn handle_incoming_unsafe(&mut self, room: String, message: String, init_ts: u128, attempts: u16, ctx: &mut Context<Self>) {
-        let since_the_epoch = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards").as_millis();
 
         let h1 = self.handle_incoming_offline(&room, &message, ctx);
         let h2 = self.handle_incoming_sign(&room, &message, ctx);
@@ -162,7 +159,7 @@ impl Coordinator {
             self.retry(RetryEnvelope {
                 room,
                 message,
-                initial_timestamp: current_timestamp(),
+                initial_timestamp: init_ts,
                 attempts: attempts + 1,
             }, ctx);
         }
@@ -397,6 +394,16 @@ impl Handler<ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>> for Coordinator
     type Result = ();
 
     fn handle(&mut self, msg: ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>, _: &mut Context<Self>) {
+        let group = PublicKeyGroup::new(
+            msg.input.public_keys.clone(),
+            msg.input.t,
+            msg.input.own_public_key.clone(),
+        );
+
+        let group_id = group.get_group_id();
+        let room = msg.input.request_id.clone() + "@" + group_id.clone().as_str();
+        self.offline_state_runners.remove(&*room);
+
         let sum_pk_bytes = msg.output.public_key().to_bytes(true);
         let sum_pk = hex::encode(sum_pk_bytes.deref());
         log::info!("Public key is {:?}", sum_pk);
@@ -430,7 +437,8 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coo
 
     fn handle(&mut self, msg: ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>, ctx: &mut Context<Self>) {
         log::info!("result {:?}", msg.output.public_key());
-        let reqId = msg.input.inner.request_id.clone();
+
+        self.offline_state_runners.remove(msg.input.room.as_str());
         let do_it = || -> Result<()>{
             let message = BigInt::from_hex(msg.input.inner.message.as_ref())?;
             let completed_offline_stage = msg.output;
@@ -460,7 +468,7 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coo
             Ok(_) => {}
             Err(_) => {
                 let _ = self.tx_res.send(ResponsePayload {
-                    request_id: reqId,
+                    request_id: msg.input.inner.request_id.clone(),
                     result: None,
                     request_type: "SIGN".to_owned(),
                     request_status: "ERROR".to_owned(),
