@@ -135,7 +135,7 @@ impl Coordinator {
 
     fn retry(&mut self, envelope: RetryEnvelope, ctx: &mut Context<Self>) {
         if envelope.attempts > 5 {
-            log::error!("reached max retries for message: {}", envelope.message);
+            log::error!("reached max retries for room {} message: {}", envelope.room, envelope.message);
         } else {
             ctx.run_later(Duration::from_secs(2_u32.pow(envelope.attempts as u32) as u64), move |_, _ctx| {
                 _ctx.notify(envelope);
@@ -154,7 +154,7 @@ impl Coordinator {
             (_, _, true) => { "keygen" }
             _ => { "none" }
         };
-        log::debug!("Coordinator routing message (handled by {}): {} {}", handled_by, room, message);
+        log::debug!("Coordinator routing message (handled by {}, attempts: {}): {} {:}", handled_by, attempts, room, message.chars().take(50).collect::<String>());
         if h1.or(h2).or(h3).is_err() {
             self.retry(RetryEnvelope {
                 room,
@@ -321,7 +321,6 @@ impl Handler<SignRequest> for Coordinator {
             s_l: s_l.clone(),
         };
         let s = serde_json::to_string(&local_share.share);
-        log::debug!("Local share is {:}", s.unwrap());
         let state = OfflineStage::new(index_in_s_l, s_l, local_share.share);
         log::debug!("Party index is {:?}", index_in_s_l);
         log::debug!("OfflineStage is {:?}", state);
@@ -424,7 +423,7 @@ impl Handler<ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>> for Coordinator
 
         match saved {
             Ok(()) => {
-                log::debug!("Saved local share: {:?}", share);
+                log::debug!("Saved local share.");
             }
             Err(e) => { log::error!("Failed to save local share: {}", e); }
         }

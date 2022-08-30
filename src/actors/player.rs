@@ -41,7 +41,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         where
             SM: StateMachine + Debug + Unpin,
     {
-        log::debug!("Player room {}", &room);
+        log::info!("Started player for room {}", &room);
         Self {
             input,
             room,
@@ -56,7 +56,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         }
     }
     fn send_error(&mut self, error: SM::Err, message: Msg<SM::MessageBody>) {
-        log::debug!("Sending error");
+        log::error!("Sending error");
         let _ = self.coordinator.do_send(ProtocolError { room: self.room.clone(), error, message });
     }
 }
@@ -113,7 +113,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         for msg in self.state.message_queue().drain(..) {
             match serde_json::to_string(&msg) {
                 Ok(serialized) => {
-                    log::debug!("Sending message {:?}", serde_json::to_string(&msg));
+                    log::debug!("Sending message {:?}", serde_json::to_string(&msg).unwrap_or("".to_string()).chars().take(50).collect::<String>());
                     let _ = self.message_broker.do_send(OutgoingEnvelope {
                         room: self.room.clone(),
                         message: serialized,
@@ -186,7 +186,7 @@ impl<I, SM> Handler<IncomingMessage<Msg<SM::MessageBody>>> for MpcPlayer<I, SM, 
             return;
         }
         log::debug!("Round before: {}", self.state.current_round());
-        log::debug!("Received message {:?}", serde_json::to_string(&msg.message));
+        log::debug!("Received message {:?}", serde_json::to_string(&msg.message).unwrap_or("".to_string()).chars().take(50).collect::<String>());
         let valid_receiver = match msg.message.receiver {
             Some(i) if i != self.index => { false }
             _ => { true }

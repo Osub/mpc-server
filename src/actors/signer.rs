@@ -103,7 +103,7 @@ impl<I> Actor for Signer<I>
 {
     type Context = Context<Self>;
     fn started(&mut self, _: &mut Self::Context) {
-        log::debug!("Started signer");
+        log::info!("Started signer for room {}", self.room);
         let _ = self.send_my_partial_signature();
     }
 }

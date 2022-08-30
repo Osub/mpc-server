@@ -123,7 +123,6 @@ fn get_secret_key(path: PathBuf, password: String) -> Result<(SecretKey, PublicK
 }
 
 fn main() -> std::io::Result<()> {
-    ::std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
     let args: Cli = Cli::from_args();
     let (tx, mut rx) = unbounded_channel::<Payload>();
