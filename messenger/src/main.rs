@@ -45,6 +45,11 @@ async fn broadcast(db: &State<Db>, message: String) -> Status {
     Status::Ok
 }
 
+#[rocket::get("/healthcheck")]
+async fn healthcheck() -> &'static str {
+    "OK"
+}
+
 struct Db {
     rooms: RwLock<HashMap<String, Arc<Room>>>,
 }
@@ -193,7 +198,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.port
     ));
     rocket::custom(figment)
-        .mount("/", rocket::routes![subscribe, broadcast])
+        .mount("/", rocket::routes![subscribe, broadcast, healthcheck])
         .manage(Db::empty())
         .launch()
         .await?;

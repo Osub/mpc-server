@@ -16,8 +16,8 @@ use cli::Cli;
 
 use crate::actors::{Coordinator, handle};
 use crate::core::{KeygenPayload, Payload, ResponsePayload, SignPayload};
-use crate::transport::join_computation;
 use crate::key::decrypt;
+use crate::transport::{join_computation, SmClient};
 
 mod core;
 mod actors;
@@ -43,11 +43,11 @@ fn save_result(db: &sled::Db, response: ResponsePayload) -> Result<()> {
 }
 
 async fn keygen(data: web::Data<AppState>, req: web::Json<KeygenPayload>) -> impl Responder {
-    let exists_already = data.results_db.contains_key(req.request_id.as_bytes()).map_or(false, |x|x);
+    let exists_already = data.results_db.contains_key(req.request_id.as_bytes()).map_or(false, |x| x);
     if exists_already {
         return HttpResponse::BadRequest().body(format!("A request of id \"{}\" already exists.", req.request_id));
     }
-    let _ = data.tx_res.send(ResponsePayload{
+    let _ = data.tx_res.send(ResponsePayload {
         request_id: req.0.request_id.clone(),
         result: None,
         request_type: "KEYGEN".to_owned(),
@@ -64,13 +64,13 @@ async fn keygen(data: web::Data<AppState>, req: web::Json<KeygenPayload>) -> imp
 }
 
 async fn sign(data: web::Data<AppState>, req: web::Json<SignPayload>) -> impl Responder {
-    let exists_already = data.results_db.contains_key(req.request_id.as_bytes()).map_or(false, |x|x);
+    let exists_already = data.results_db.contains_key(req.request_id.as_bytes()).map_or(false, |x| x);
     if exists_already {
         return HttpResponse::BadRequest().body(format!("A request of id \"{}\" already exists.", req.request_id));
     }
-    match  BigInt::from_hex(req.message.as_str()) {
+    match BigInt::from_hex(req.message.as_str()) {
         Ok(_) => {
-            let _ = data.tx_res.send(ResponsePayload{
+            let _ = data.tx_res.send(ResponsePayload {
                 request_id: req.0.request_id.clone(),
                 result: None,
                 request_type: "SIGN".to_owned(),
@@ -135,6 +135,10 @@ fn main() -> std::io::Result<()> {
     let local_shares_path = args.db_path.join("local_shares");
     let local_share_db: sled::Db = sled::open(local_shares_path).unwrap();
     let tx_res1 = tx_res.clone();
+    sys.block_on(async {
+        surf::get(args.messenger_address.clone().join("healthcheck").unwrap())
+            .await.unwrap()
+    });
     let s = async move {
         match join_computation(args.messenger_address, sk).await {
             Ok((incoming, outgoing)) => {
