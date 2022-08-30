@@ -12,8 +12,8 @@ gen_keypair() {
   DIR=tmp/party${IND}
   mkdir -p $DIR
   echo "Preparing key-pair for party ${IND}"
-  echo -n ${PUBKEYS[$((IND-1))]} > $DIR/pub.key
-  echo -n ${SECKEYS[$((IND-1))]} > $DIR/pri.key
+  /bin/echo -n "${PUBKEYS[$((IND-1))]}" > $DIR/pub.key
+  /bin/echo -n "${SECKEYS[$((IND-1))]}" > $DIR/pri.key
 }
 
 start_mpc_server(){
