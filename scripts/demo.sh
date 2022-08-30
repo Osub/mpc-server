@@ -3,13 +3,17 @@
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
 NUM_PARTIES=3
+PUBKEYS=("03c20e0c088bb20027a77b1d23ad75058df5349c7a2bfafff7516c44c6f69aa66d" "03d0639e479fa1ca8ee13fd966c216e662408ff00349068bdc9c6966c4ea10fe3e" "0373ee5cd601a19cd9bb95fe7be8b1566b73c51d3e7e375359c129b1d77bb4b3e6")
+SECKEYS=("f6826fc16547130848ea32196c95457b4698feded1a8f109eb224ddcd27d66af7d0f88b44d2765a4a567a8999a4410852510deacdcb87e0c7cfe23fa1d0090a8" "9f099ed7a7615ce2d7de100a8feaf39adfa904146ee523f6dacaad6a3f69b4e9d10f2b01c13dc31b1265f9042d7437f63ad81c5113dec541bb799e49dd21c571" "e3858ec05c7762d79de30428a2561a520123b1e2b16687ae57ba0ba550e07ffac49861bab15fe62678435c8ae2a57522752a7b8af68d7591ca0e7b44c5f64a4d")
+#PLAINSECKEYS=("59d1c6956f08477262c9e827239457584299cf583027a27c1d472087e8c35f21" "6c326909bee727d5fc434e2c75a3e0126df2ec4f49ad02cdd6209cf19f91da33" "5431ed99fbcc291f2ed8906d7d46fdf45afbb1b95da65fecd4707d16a6b3301b")
 
 gen_keypair() {
   IND=$1
   DIR=tmp/party${IND}
   mkdir -p $DIR
-  echo "Generating key-pair for party ${IND}"
-  $SCRIPT_DIR/../secp256k1-id/target/debug/secp256k1-id -p $DIR/pub.key -s $DIR/pri.key
+  echo "Preparing key-pair for party ${IND}"
+  echo -n ${PUBKEYS[$((IND-1))]} > $DIR/pub.key
+  echo -n ${SECKEYS[$((IND-1))]} > $DIR/pri.key
 }
 
 start_mpc_server(){
@@ -18,7 +22,9 @@ start_mpc_server(){
   mkdir -p $DIR
   PORT=800${IND}
   echo "Starting MPC Server ${i}"
-  RUST_BACKTRACE=full $SCRIPT_DIR/../target/debug/mpc-server -s ${DIR}/pri.key --port ${PORT} -m http://127.0.0.1:8000  --db-path ${DIR}/db > ${DIR}/log.txt 2>&1 &
+  RUST_BACKTRACE=full $SCRIPT_DIR/../target/debug/mpc-server -s ${DIR}/pri.key \
+  --password RBuCJbmWY1Mtcl5LoMRqkQQpT5GJmCEvbuRR7ewCPDATBzFtm9a6jhIovftgddmL \
+  --port ${PORT} -m http://127.0.0.1:8000  --db-path ${DIR}/db > ${DIR}/log.txt 2>&1 &
 }
 
 # 0. Clean up

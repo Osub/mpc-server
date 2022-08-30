@@ -129,7 +129,7 @@ fn main() -> std::io::Result<()> {
     let (tx, mut rx) = unbounded_channel::<Payload>();
     let (tx_res, mut rx_res) = unbounded_channel::<ResponsePayload>();
     let sys = actix::System::new();
-    let (sk, pk) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't find secret key path.").unwrap();
+    let (sk, pk) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't get secret key.").unwrap();
     let own_public_key = hex::encode(pk.serialize_compressed());
     let results_path = args.db_path.join("results");
     let results_db: sled::Db = sled::open(results_path).unwrap();
