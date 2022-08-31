@@ -5,6 +5,7 @@ use round_based::{Msg, StateMachine};
 use serde::Serialize;
 use tokio::time::{self};
 
+use kv_log_macro::{debug};
 use super::messages::{IncomingMessage, MaybeProceed, OutgoingEnvelope, ProtocolError, ProtocolOutput};
 
 pub struct MpcPlayer<I: Send + Clone + Unpin + 'static, SM, M: Send, E: Send, O: Send> {
@@ -41,7 +42,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         where
             SM: StateMachine + Debug + Unpin,
     {
-        log::info!("Started player for room {}", &room);
+        debug!("Started player", {room: format!("\"{}\"", &room)});
         Self {
             input,
             room,
@@ -56,7 +57,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         }
     }
     fn send_error(&mut self, error: SM::Err, message: Msg<SM::MessageBody>) {
-        log::error!("Sending error");
+        debug!("Sending error");
         let _ = self.coordinator.do_send(ProtocolError { room: self.room.clone(), error, message });
     }
 }
@@ -88,10 +89,10 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
     fn handle_incoming(&mut self, msg: Msg<SM::MessageBody>) {
         match self.state.handle_incoming(msg.clone()) {
             Ok(()) => {
-                log::debug!("Handle Ok State: {:?}", self.state);
+                debug!("Handle Ok", { state: format!("\"{:?}\"", self.state) });
             }
             Err(e) => {
-                log::debug!("Handle Err State: {:?}", self.state);
+                debug!("Handle Err", { state: format!("\"{:?}\"", self.state) });
                 self.send_error(e, msg)
             }
         }
@@ -107,13 +108,14 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
 
     fn send_outgoing(&mut self, _ctx: &mut Context<Self>) {
         if !self.state.message_queue().is_empty() {
-            log::debug!("Message queue size is {}", self.state.message_queue().len());
+            debug!("Message queue size is {}", self.state.message_queue().len());
         }
 
         for msg in self.state.message_queue().drain(..) {
             match serde_json::to_string(&msg) {
                 Ok(serialized) => {
-                    log::debug!("Sending message {:?}", serde_json::to_string(&msg).unwrap_or("".to_string()).chars().take(50).collect::<String>());
+
+                    debug!("Sending message", { protocolMessage: serde_json::to_string(&msg).unwrap()});
                     let _ = self.message_broker.do_send(OutgoingEnvelope {
                         room: self.room.clone(),
                         message: serialized,
@@ -185,26 +187,32 @@ impl<I, SM> Handler<IncomingMessage<Msg<SM::MessageBody>>> for MpcPlayer<I, SM, 
         if msg.message.sender == self.index {
             return;
         }
-        log::debug!("Round before: {}", self.state.current_round());
-        log::debug!("Received message {:?}", serde_json::to_string(&msg.message).unwrap_or("".to_string()).chars().take(50).collect::<String>());
+        let round_before = self.state.current_round();
         let valid_receiver = match msg.message.receiver {
             Some(i) if i != self.index => { false }
             _ => { true }
         };
         if !valid_receiver {
             // TODO: Is this necessary? Other option is let state machine take the message and throw error.
-            log::debug!("The message is not addressed to me. {} {}", msg.message.receiver.unwrap(), self.index);
+            // log::debug!("The message is not addressed to me. {} {}", msg.message.receiver.unwrap(), self.index);
             return;
         }
         self.msg_count += 1;
         self.handle_incoming(msg.message.clone());
         match self.maybe_proceed(ctx) {
             Err(e) => {
-                self.send_error(e, msg.message)
+                self.send_error(e, msg.message.clone())
             }
             _ => {}
         }
-        log::debug!("Round after: {}", self.state.current_round());
+
+        debug!("Received message", {
+            protocolMessage: serde_json::to_string(&msg.message).unwrap(),
+            round_before: round_before,
+            round_after: self.state.current_round(),
+            state: format!("\"{:?}\"", self.state)
+        });
+        // log::debug!("Round after: {}", self.state.current_round());
     }
 }
 
@@ -221,13 +229,13 @@ impl<I, SM> Handler<MaybeProceed> for MpcPlayer<I, SM, SM::MessageBody, SM::Err,
 
     fn handle(&mut self, _: MaybeProceed, ctx: &mut Context<Self>) {
         if self.msg_count == 0 {
-            log::debug!("Try to proceed");
+            // log::debug!("Try to proceed");
             self.maybe_proceed(ctx);
             ctx.run_later(Duration::from_millis(250), |_, _ctx| {
                 let _ = _ctx.address().do_send(MaybeProceed {});
             });
         } else {
-            log::debug!("Ignore proceed");
+            // log::debug!("Ignore proceed");
         }
     }
 }

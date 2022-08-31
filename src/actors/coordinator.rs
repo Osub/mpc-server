@@ -20,7 +20,7 @@ use round_based::{Msg, StateMachine};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
-
+use kv_log_macro as log;
 use crate::core::{MpcGroup, PublicKeyGroup, ResponsePayload};
 
 use super::messages::*;
@@ -135,7 +135,7 @@ impl Coordinator {
 
     fn retry(&mut self, envelope: RetryEnvelope, ctx: &mut Context<Self>) {
         if envelope.attempts > 5 {
-            log::error!("reached max retries for room {} message: {}", envelope.room, envelope.message);
+            log::error!("reached max retries", {protocolMessage: envelope.message});
         } else {
             ctx.run_later(Duration::from_secs(2_u32.pow(envelope.attempts as u32) as u64), move |_, _ctx| {
                 _ctx.notify(envelope);
@@ -154,7 +154,14 @@ impl Coordinator {
             (_, _, true) => { "keygen" }
             _ => { "none" }
         };
-        log::debug!("Coordinator routing message (handled by {}, attempts: {}): {} {:}", handled_by, attempts, room, message.chars().take(50).collect::<String>());
+        if attempts ==0{
+            log::debug!("Coordinator routing message", {
+                handled_by: format!("\"{}\"", &handled_by),
+                room: format!("\"{}\"", &room),
+                protocolMessage: message
+            });
+        }
+
         if h1.or(h2).or(h3).is_err() {
             self.retry(RetryEnvelope {
                 room,
@@ -168,6 +175,7 @@ impl Coordinator {
     fn handle_incoming(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) {
         match self.valid_sender(msg.clone()) {
             Ok(()) => {
+                log::debug!("");
                 self.handle_incoming_unsafe(msg.room, msg.message, current_timestamp(), 0, ctx);
             }
             Err(_) => {
@@ -249,7 +257,7 @@ impl Handler<KeygenRequest> for Coordinator {
     type Result = Result<()>;
 
     fn handle(&mut self, req: KeygenRequest, ctx: &mut Context<Self>) -> Self::Result {
-        log::info!("Received request {:?}", req);
+        log::info!("Received request", {request: serde_json::to_string(&req).unwrap()});
         let KeygenRequest { request_id, public_keys, t, own_public_key } = req.clone();
         let _ = self.tx_res.send(ResponsePayload {
             request_id,
@@ -281,7 +289,7 @@ impl Handler<SignRequest> for Coordinator {
     type Result = Result<()>;
 
     fn handle(&mut self, req: SignRequest, ctx: &mut Context<Self>) -> Self::Result {
-        log::info!("Received request {:?}", req);
+        log::info!("Received request", { request: serde_json::to_string( &req).unwrap() });
         let local_share = self.retrieve_local_share(req.public_key.clone()).context("Retrieve local share.")?;
         let group = PublicKeyGroup::new(
             local_share.public_keys,
@@ -321,9 +329,10 @@ impl Handler<SignRequest> for Coordinator {
             s_l: s_l.clone(),
         };
         let s = serde_json::to_string(&local_share.share);
+        // log::debug!("Local share is {:}", s.unwrap());
         let state = OfflineStage::new(index_in_s_l, s_l, local_share.share);
         log::debug!("Party index is {:?}", index_in_s_l);
-        log::debug!("OfflineStage is {:?}", state);
+        // log::debug!("OfflineStage is {:?}", state);
         let state = state.context("Create state machine")?;
         let player = MpcPlayer::new(
             req.clone(),
@@ -423,9 +432,11 @@ impl Handler<ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>> for Coordinator
 
         match saved {
             Ok(()) => {
-                log::debug!("Saved local share.");
+                // log::debug!("Saved local share: {:?}", share);
             }
-            Err(e) => { log::error!("Failed to save local share: {}", e); }
+            Err(e) => {
+             //log::error!("Failed to save local share: {}", e);
+            }
         }
     }
 }
@@ -435,7 +446,7 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coo
     type Result = ();
 
     fn handle(&mut self, msg: ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>, ctx: &mut Context<Self>) {
-        log::info!("result {:?}", msg.output.public_key());
+        log::info!("output public key", { room: format!("{:?}", msg.input.room), publicKey: format!("\"{}\"", hex::encode(msg.output.public_key().to_bytes(true).as_ref()))} );
 
         self.offline_state_runners.remove(msg.input.room.as_str());
         let do_it = || -> Result<()>{
@@ -491,7 +502,7 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, SignatureRecid>> for Coordinato
         sig.push_str(s.as_str());
         sig.push_str(v.as_str());
 
-        log::info!("Sign request done {:?} sig: {:?}", msg.input, sig);
+        // log::info!("Sign request done {:?} sig: {:?}", msg.input, sig);
         let request_id = msg.input.inner.request_id.clone();
         let _ = self.tx_res.send(ResponsePayload {
             request_id,

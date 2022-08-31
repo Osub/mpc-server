@@ -5,6 +5,7 @@ use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::Signature
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{CompletedOfflineStage, PartialSignature, SignManual};
 use round_based::Msg;
 
+use kv_log_macro as log;
 use super::messages::{IncomingMessage, OutgoingEnvelope, ProtocolOutput};
 
 pub struct Signer<I: Send> {
@@ -61,7 +62,7 @@ impl<I> Signer<I>
         };
         match serde_json::to_string(&sig_msg) {
             Ok(serialized) => {
-                log::debug!("Sending message {:?}", serde_json::to_string(&sig_msg));
+                // log::debug!("Sending message {:?}", serde_json::to_string(&sig_msg));
                 let _ = self.message_broker.do_send(OutgoingEnvelope {
                     room: self.room.clone(),
                     message: serialized,
@@ -103,7 +104,7 @@ impl<I> Actor for Signer<I>
 {
     type Context = Context<Self>;
     fn started(&mut self, _: &mut Self::Context) {
-        log::info!("Started signer for room {}", self.room);
+        log::debug!("Started signer", { room: format!("\"{}\"", self.room) });
         let _ = self.send_my_partial_signature();
     }
 }

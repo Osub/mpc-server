@@ -47,7 +47,7 @@ async fn broadcast(db: &State<Db>, message: String) -> Status {
 
 #[rocket::get("/healthcheck")]
 async fn healthcheck() -> &'static str {
-    "OK"
+  "OK"
 }
 
 struct Db {

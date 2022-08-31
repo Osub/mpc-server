@@ -11,6 +11,8 @@ use crate::core::{Payload, KeygenPayload, SignPayload};
 use either::Either;
 use messages::{KeygenRequest, SignRequest};
 
+use kv_log_macro as log;
+
 fn handle_keygen(coordinator: &Addr<Coordinator>, own_public_key: String, payload: KeygenPayload){
     let KeygenPayload { request_id, public_keys, t } = payload;
     coordinator.do_send(KeygenRequest {
@@ -48,13 +50,14 @@ async fn handle_sign(coordinator: &Addr<Coordinator>, own_public_key: String, pa
 }
 
 pub async fn handle(coordinator: &Addr<Coordinator>, own_public_key: String, payload: Payload) {
-    log::info!("Received request {:?}", payload);
     match payload {
-        Either::Left(_) => {
-            handle_keygen(coordinator, own_public_key, payload.left().unwrap());
+        Either::Left(payload) => {
+            log::info!("Received request", { payload: serde_json::to_string(&payload).unwrap()});
+            handle_keygen(coordinator, own_public_key, payload);
         }
-        Either::Right(_) => {
-            handle_sign(coordinator, own_public_key, payload.right().unwrap()).await;
+        Either::Right(payload) => {
+            log::info!("Received request", { payload: serde_json::to_string(&payload).unwrap()});
+            handle_sign(coordinator, own_public_key, payload).await;
         }
     }
 }

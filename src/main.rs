@@ -1,4 +1,4 @@
-extern crate env_logger;
+extern crate json_env_logger;
 
 use std::path::PathBuf;
 
@@ -11,7 +11,7 @@ use either::Either;
 use secp256k1::{PublicKey, SecretKey};
 use structopt::StructOpt;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
-
+use kv_log_macro as log;
 use cli::Cli;
 
 use crate::actors::{Coordinator, handle};
@@ -123,7 +123,7 @@ fn get_secret_key(path: PathBuf, password: String) -> Result<(SecretKey, PublicK
 }
 
 fn main() -> std::io::Result<()> {
-    env_logger::init();
+    json_env_logger::init();
     let args: Cli = Cli::from_args();
     let (tx, mut rx) = unbounded_channel::<Payload>();
     let (tx_res, mut rx_res) = unbounded_channel::<ResponsePayload>();
