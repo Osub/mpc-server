@@ -115,7 +115,6 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
             match serde_json::to_string(&msg) {
                 Ok(serialized) => {
 
-                    debug!("Sending message", { protocolMessage: serde_json::to_string(&msg).unwrap()});
                     let _ = self.message_broker.do_send(OutgoingEnvelope {
                         room: self.room.clone(),
                         message: serialized,

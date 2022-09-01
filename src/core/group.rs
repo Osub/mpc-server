@@ -1,12 +1,25 @@
+extern crate base64;
+
+use anyhow::Context;
+#[allow(unused_imports)]
+use anyhow::Result;
+use ecies::{encrypt, decrypt};
 use round_based::Msg;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use thiserror::Error;
 
 pub trait MpcGroup {
     fn valid_msg<T>(&self, sender_public_key: &String, msg: &Msg<T>) -> bool;
     fn get_i(&self) -> u16;
     fn get_t(&self) -> u16;
     fn get_n(&self) -> u16;
+}
+
+#[derive(Debug, Error)]
+enum GroupError {
+    #[error("The index is not in the range [1, n].")]
+    InvalidIndex,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -36,6 +49,27 @@ impl PublicKeyGroup {
     }
     pub fn get_group_id(&self) -> String {
         self.group_id.clone()
+    }
+
+    pub fn get_public_key(&self, index: usize) -> Result<String> {
+        if index == 0 || index > self.public_keys.len() {
+            return Err(GroupError::InvalidIndex.into());
+        }
+        return Ok(self.public_keys[index - 1].clone());
+    }
+
+    pub fn encrypt(&self, index: usize, plaintext: &str) -> Result<String> {
+        let pk = self.get_public_key(index)?;
+        let pk = hex::decode(pk)?;
+        let ciphertext = encrypt(pk.as_slice(), plaintext.as_bytes())?;
+        return Ok(base64::encode(ciphertext));
+    }
+
+    pub fn decrypt(sk:&[u8], ciphertext: &str) -> Result<String> {
+        let ciphertext = base64::decode(ciphertext).context("decode base64 ciphertext")?;
+        let plaintext = decrypt(sk, ciphertext.as_slice()).context("decrypt")?;
+        let plaintext = std::str::from_utf8(plaintext.as_slice()).context("decode utf8")?;
+        return Ok(plaintext.to_string());
     }
 
     pub fn get_index(&self, public_key: &String) -> Option<usize> {

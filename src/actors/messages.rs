@@ -2,6 +2,7 @@ use actix::prelude::*;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use anyhow::{Result};
+use serde_json::value::RawValue;
 
 #[derive(Message)]
 #[rtype(result = "()")]
@@ -122,4 +123,16 @@ pub struct ProtocolError<E, M> {
 pub struct ProtocolOutput<I, O> {
     pub input: I,
     pub output: O,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GenericProtocolMessage {
+    pub sender: u16,
+    pub receiver: Option<u16>,
+    pub body: Box<RawValue>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Encrypted {
+    pub encrypted: String
 }

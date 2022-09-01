@@ -13,14 +13,16 @@ use curv::elliptic::curves::Secp256k1;
 use futures::Sink;
 use futures_util::SinkExt;
 use futures_util::TryStreamExt;
+use kv_log_macro as log;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::SignatureRecid;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{Error as KeygenError, Keygen, LocalKey, ProtocolMessage as KeygenProtocolMessage};
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{CompletedOfflineStage, Error as OfflineStageError, Error, OfflineProtocolMessage, OfflineStage, PartialSignature};
 use round_based::{Msg, StateMachine};
+use secp256k1::{PublicKey, SecretKey};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
-use kv_log_macro as log;
+
 use crate::core::{MpcGroup, PublicKeyGroup, ResponsePayload};
 
 use super::messages::*;
@@ -47,6 +49,13 @@ enum DataError {
     GroupNotFound(String),
 }
 
+
+#[derive(Debug, Error)]
+enum RoutingError {
+    #[error("The message is not for me.")]
+    NotForMe,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct StoredLocalShare {
     public_keys: Vec<String>,
@@ -55,6 +64,7 @@ struct StoredLocalShare {
 }
 
 pub struct Coordinator {
+    sk: Vec<u8>,
     tx_res: UnboundedSender<ResponsePayload>,
     db: sled::Db,
     keygen_runners: HashMap<String, Addr<MpcPlayer<KeygenRequest, Keygen, <Keygen as StateMachine>::MessageBody, <Keygen as StateMachine>::Err, <Keygen as StateMachine>::Output>>>,
@@ -64,7 +74,7 @@ pub struct Coordinator {
 }
 
 impl Coordinator {
-    pub fn new<Si, St>(tx_res: UnboundedSender<ResponsePayload>, db: sled::Db, stream: St, sink: Si) -> Addr<Self>
+    pub fn new<Si, St>(sk: SecretKey, tx_res: UnboundedSender<ResponsePayload>, db: sled::Db, stream: St, sink: Si) -> Addr<Self>
         where
             St: Stream<Item=Result<SignedEnvelope<String>>> + 'static,
             Si: Sink<Envelope, Error=anyhow::Error> + 'static,
@@ -81,6 +91,7 @@ impl Coordinator {
         Self::create(|ctx| {
             ctx.add_stream(stream);
             Self {
+                sk: sk.serialize().to_vec(),
                 tx_res,
                 db,
                 keygen_runners: HashMap::new(),
@@ -91,15 +102,76 @@ impl Coordinator {
         })
     }
 
-    fn valid_sender(&mut self, msg: IncomingEnvelope) -> Result<()> {
-        let split = msg.room.split("@").collect::<Vec<&str>>();
+
+    fn get_group_id<'a>(&mut self, room: &'a str) -> Result<&'a str> {
+        let split = room.split("@").collect::<Vec<&str>>();
         if split.len() < 2 {
             return Err(GroupError::FailedToParseGroupId.into());
         }
-        let group_id = split[1];
+        Ok(split[1])
+    }
+
+    fn valid_sender_and_receiver(&mut self, msg: IncomingEnvelope) -> Result<()> {
+        let group_id = self.get_group_id(&msg.room).context("extract group_id")?;
         let group = self.retrieve_group(group_id.to_string()).context("Retrieve group.")?;
         group.get_index(&msg.sender_public_key).map_or(Err(GroupError::WrongPublicKey), |_| Ok(())).context("Validate sender.")?;
-        Ok(())
+        let mut m = serde_json::from_str::<GenericProtocolMessage>(&msg.message).context("parse GenericProtocolMessage")?;
+        match m.receiver {
+            Some(receiver) => {
+                if receiver != group.get_i() {
+                    return Err(RoutingError::NotForMe.into());
+                }
+                return Ok(())
+            }
+            None => {
+                Ok(())
+            }
+        }
+    }
+
+    fn maybe_encrypt(&mut self, msg: &mut OutgoingEnvelope) -> Result<()> {
+        let mut m = serde_json::from_str::<GenericProtocolMessage>(&msg.message).context("parse GenericProtocolMessage")?;
+        match m.receiver {
+            Some(receiver) => {
+                let group_id = self.get_group_id(&msg.room).context("extract group_id")?;
+                let group = self.retrieve_group(group_id.to_string()).context("Retrieve group.")?;
+                let encrypted = group.encrypt(receiver as usize, m.body.to_string().as_str()).context("encrypt")?;
+                let encryptedMessage = Encrypted {
+                    encrypted,
+                };
+                let body = serde_json::to_string(&encryptedMessage).context("stringify Encrypted")?;
+                let body = serde_json::value::RawValue::from_string(body).context("convert to RawValue")?;
+                m.body = body;
+                let m = serde_json::to_string(&m).context("convert to string")?;
+                msg.message = m;
+                Ok(())
+            }
+            None => {
+                Ok(())
+            }
+        }
+    }
+
+    fn maybe_decrypt(&mut self, msg: &mut IncomingEnvelope) -> Result<()> {
+        let mut m = serde_json::from_str::<GenericProtocolMessage>(&msg.message).context("parse GenericProtocolMessage")?;
+        match m.receiver {
+            Some(_) => {
+                let encryptedMessage =
+                    serde_json::from_str::<Encrypted>(m.body.to_string().as_ref()).context("parse encrypted")?;
+
+                let decrypted =
+                    PublicKeyGroup::decrypt(self.sk.as_ref(), encryptedMessage.encrypted.as_str()).context("decrypt")?;
+
+                let decrypted = serde_json::value::RawValue::from_string(decrypted).context("convert to RawValue")?;
+                m.body = decrypted;
+                let m = serde_json::to_string(&m).context("convert to string")?;
+                msg.message = m;
+                Ok(())
+            }
+            None => {
+                Ok(())
+            }
+        }
     }
 
     fn handle_incoming_keygen(&mut self, room: &String, message: &String, _: &mut Context<Self>) -> Result<()> {
@@ -144,7 +216,6 @@ impl Coordinator {
     }
 
     fn handle_incoming_unsafe(&mut self, room: String, message: String, init_ts: u128, attempts: u16, ctx: &mut Context<Self>) {
-
         let h1 = self.handle_incoming_offline(&room, &message, ctx);
         let h2 = self.handle_incoming_sign(&room, &message, ctx);
         let h3 = self.handle_incoming_keygen(&room, &message, ctx);
@@ -154,7 +225,7 @@ impl Coordinator {
             (_, _, true) => { "keygen" }
             _ => { "none" }
         };
-        if attempts ==0{
+        if attempts == 0 {
             log::debug!("Coordinator routing message", {
                 handled_by: format!("\"{}\"", &handled_by),
                 room: format!("\"{}\"", &room),
@@ -173,13 +244,20 @@ impl Coordinator {
     }
 
     fn handle_incoming(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) {
-        match self.valid_sender(msg.clone()) {
+        match self.valid_sender_and_receiver(msg.clone()) {
             Ok(()) => {
-                log::debug!("");
-                self.handle_incoming_unsafe(msg.room, msg.message, current_timestamp(), 0, ctx);
+                let mut transformedMsg = msg.clone();
+                match self.maybe_decrypt(&mut transformedMsg) {
+                    Ok(_) => {
+                        self.handle_incoming_unsafe(msg.room, transformedMsg.message, current_timestamp(), 0, ctx);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to decrypt message", {protocolMessage: serde_json::to_string(&msg).unwrap()});
+                    }
+                }
             }
             Err(_) => {
-                log::debug!("Not valid sender.")
+                log::debug!("Not valid sender or not addressed to me.")
                 // Do nothing
             }
         }
@@ -191,6 +269,7 @@ impl Coordinator {
                 let mut sink = with_ctx(|actor: &mut Self, _| actor.sink.take())
                     .expect("Sink to be present");
 
+                log::debug!("Sending message", { protocolMessage: serde_json::to_string(&envelope).unwrap()});
                 // Send the request
                 let _ = sink.send(Envelope {
                     room: envelope.room,
@@ -392,8 +471,15 @@ impl Handler<OutgoingEnvelope> for Coordinator
 {
     type Result = ();
 
-    fn handle(&mut self, msg: OutgoingEnvelope, ctx: &mut Context<Self>) {
-        ctx.spawn(Self::send_one(msg).interop_actor(self));
+    fn handle(&mut self, mut msg: OutgoingEnvelope, ctx: &mut Context<Self>) {
+        match self.maybe_encrypt(&mut msg) {
+            Ok(_) => {
+                ctx.spawn(Self::send_one(msg).interop_actor(self));
+            }
+            Err(e) => {
+                log::error!("Failed encrypt message: {}", e);
+            }
+        }
     }
 }
 
@@ -435,7 +521,7 @@ impl Handler<ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>> for Coordinator
                 // log::debug!("Saved local share: {:?}", share);
             }
             Err(e) => {
-             //log::error!("Failed to save local share: {}", e);
+                //log::error!("Failed to save local share: {}", e);
             }
         }
     }

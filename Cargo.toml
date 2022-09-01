@@ -18,7 +18,7 @@ tokio ="1.17.0"
 json_env_logger = { version = "0.1", features = ["iso-timestamps"] }
 kv-log-macro = "1.0"
 log = { version="0.4", features = ["kv_unstable_std", "kv_unstable_serde"]}
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["raw_value"]}
 structopt ="0.3.26"
 futures="0.3.21"
 anyhow = "1.0.55"
@@ -35,3 +35,5 @@ thiserror = "1.0.30"
 sled = "0.34"
 cfb-mode = "0.8"
 aes="0.8"
+ecies = "0.2"
+base64="0.13"

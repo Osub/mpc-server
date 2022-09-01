@@ -1,5 +1,7 @@
 extern crate json_env_logger;
+extern crate base64;
 
+use std::borrow::Borrow;
 use std::path::PathBuf;
 
 use actix::prelude::*;
@@ -140,9 +142,9 @@ fn main() -> std::io::Result<()> {
             .await.unwrap()
     });
     let s = async move {
-        match join_computation(args.messenger_address, sk).await {
+        match join_computation(args.messenger_address, sk.clone()).await {
             Ok((incoming, outgoing)) => {
-                let coordinator = Coordinator::new(tx_res1, local_share_db, incoming, outgoing);
+                let coordinator = Coordinator::new(sk, tx_res1, local_share_db, incoming, outgoing);
                 while let Some(payload) = rx.recv().await {
                     handle(&coordinator, own_public_key.clone(), payload).await;
                 }
