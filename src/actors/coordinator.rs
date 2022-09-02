@@ -256,8 +256,8 @@ impl Coordinator {
                     }
                 }
             }
-            Err(_) => {
-                log::debug!("Not valid sender or not addressed to me.")
+            Err(e) => {
+                log::debug!("Failed to validate sender and receiver. {:?}", e)
                 // Do nothing
             }
         }
