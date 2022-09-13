@@ -28,6 +28,7 @@ use crate::core::{MpcGroup, PublicKeyGroup, ResponsePayload};
 use super::messages::*;
 use super::MpcPlayer;
 use super::Signer;
+use crate::prom;
 
 #[derive(Debug, Error)]
 enum GroupError {
@@ -181,6 +182,7 @@ impl Coordinator {
             room: room.clone(),
             message: msg,
         });
+        prom::COUNTER_MESSAGES_KEYGEN_HANDLED.inc();
         Ok(())
     }
 
@@ -191,7 +193,7 @@ impl Coordinator {
             room: room.clone(),
             message: msg,
         });
-
+        prom::COUNTER_MESSAGES_OFFLINE_HANDLED.inc();
         Ok(())
     }
 
@@ -202,11 +204,13 @@ impl Coordinator {
             room: room.clone(),
             message: msg,
         });
+        prom::COUNTER_MESSAGES_SIGN_HANDLED.inc();
         Ok(())
     }
 
     fn retry(&mut self, envelope: RetryEnvelope, ctx: &mut Context<Self>) {
         if envelope.attempts > 5 {
+            prom::COUNTER_MESSAGES_DROPPED.inc();
             log::error!("reached max retries", {protocolMessage: envelope.message});
         } else {
             ctx.run_later(Duration::from_secs(2_u32.pow(envelope.attempts as u32) as u64), move |_, _ctx| {
@@ -244,6 +248,7 @@ impl Coordinator {
     }
 
     fn handle_incoming(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) {
+        prom::COUNTER_MESSAGES_TOTAL_RECEIVED.inc();
         match self.valid_sender_and_receiver(msg.clone()) {
             Ok(()) => {
                 let mut transformedMsg = msg.clone();
@@ -252,11 +257,14 @@ impl Coordinator {
                         self.handle_incoming_unsafe(msg.room, transformedMsg.message, current_timestamp(), 0, ctx);
                     }
                     Err(e) => {
+                        prom::COUNTER_MESSAGES_INVALID.inc();
+                        prom::COUNTER_MESSAGES_INVALID_ENCRYPTION.inc();
                         log::error!("Failed to decrypt message", {protocolMessage: serde_json::to_string(&msg).unwrap()});
                     }
                 }
             }
             Err(e) => {
+                prom::COUNTER_MESSAGES_INVALID.inc();
                 log::debug!("Failed to validate sender and receiver. {:?}", e)
                 // Do nothing
             }
@@ -337,6 +345,7 @@ impl Handler<KeygenRequest> for Coordinator {
 
     fn handle(&mut self, req: KeygenRequest, ctx: &mut Context<Self>) -> Self::Result {
         log::info!("Received request", {request: serde_json::to_string(&req).unwrap()});
+        prom::COUNTER_REQUESTS_KEYGEN_RECEIVED.inc();
         let KeygenRequest { request_id, public_keys, t, own_public_key } = req.clone();
         let _ = self.tx_res.send(ResponsePayload {
             request_id,
@@ -368,6 +377,7 @@ impl Handler<SignRequest> for Coordinator {
     type Result = Result<()>;
 
     fn handle(&mut self, req: SignRequest, ctx: &mut Context<Self>) -> Self::Result {
+        prom::COUNTER_REQUESTS_SIGN_RECEIVED.inc();
         log::info!("Received request", { request: serde_json::to_string( &req).unwrap() });
         let local_share = self.retrieve_local_share(req.public_key.clone()).context("Retrieve local share.")?;
         let group = PublicKeyGroup::new(
@@ -488,6 +498,7 @@ impl Handler<ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>> for Coordinator
     type Result = ();
 
     fn handle(&mut self, msg: ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>, _: &mut Context<Self>) {
+        prom::COUNTER_REQUESTS_KEYGEN_DONE.inc();
         let group = PublicKeyGroup::new(
             msg.input.public_keys.clone(),
             msg.input.t,
@@ -532,6 +543,7 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coo
     type Result = ();
 
     fn handle(&mut self, msg: ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>, ctx: &mut Context<Self>) {
+        prom::COUNTER_REQUESTS_SIGN_DONE.inc();
         log::info!("output public key", { room: format!("{:?}", msg.input.room), publicKey: format!("\"{}\"", hex::encode(msg.output.public_key().to_bytes(true).as_ref()))} );
 
         self.offline_state_runners.remove(msg.input.room.as_str());

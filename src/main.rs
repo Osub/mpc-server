@@ -1,5 +1,5 @@
-extern crate json_env_logger;
 extern crate base64;
+extern crate json_env_logger;
 
 use std::borrow::Borrow;
 use std::path::PathBuf;
@@ -10,22 +10,24 @@ use anyhow::{Context, Result};
 use curv::arithmetic::Converter;
 use curv::BigInt;
 use either::Either;
+use prometheus::{Encoder, TextEncoder};
 use secp256k1::{PublicKey, SecretKey};
 use structopt::StructOpt;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
-use kv_log_macro as log;
+
 use cli::Cli;
 
 use crate::actors::{Coordinator, handle};
 use crate::core::{KeygenPayload, Payload, ResponsePayload, SignPayload};
 use crate::key::decrypt;
-use crate::transport::{join_computation, SmClient};
+use crate::transport::join_computation;
 
 mod core;
 mod actors;
 mod cli;
 mod transport;
 mod key;
+mod prom;
 
 
 struct AppState {
@@ -42,6 +44,29 @@ fn save_result(db: &sled::Db, response: ResponsePayload) -> Result<()> {
         value.as_slice(),
     )?;
     Ok(())
+}
+
+
+async fn metrics() -> impl Responder {
+    let mut buffer = Vec::new();
+    let encoder = TextEncoder::new();
+
+    let metric_families = prometheus::gather();
+    match encoder.encode(&metric_families, &mut buffer) {
+        Ok(_)=>{
+            match String::from_utf8(buffer.clone()) {
+                Ok(output)=>{
+                    HttpResponse::Ok().body(output)
+                }
+                Err(_)=>{
+                    HttpResponse::InternalServerError().body("Failed to encode metrics.")
+                }
+            }
+        }
+        Err(_)=>{
+            HttpResponse::InternalServerError().body("Failed to encode metrics.")
+        }
+    }
 }
 
 async fn keygen(data: web::Data<AppState>, req: web::Json<KeygenPayload>) -> impl Responder {
@@ -175,6 +200,7 @@ fn main() -> std::io::Result<()> {
                 .route("/keygen", web::post().to(keygen))
                 .route("/sign", web::post().to(sign))
                 .route("/result/{request_id}", web::post().to(result))
+                .route("/metrics", web::get().to(metrics))
         })
             .bind((args.address, args.port))
             .unwrap()

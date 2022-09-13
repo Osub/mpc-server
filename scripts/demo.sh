@@ -98,3 +98,6 @@ sleep 5
 
 echo "7. Checking Sign result"
 curl -X POST http://127.0.0.1:8001/result/sign-001
+
+echo "\n8. Checking metrics"
+curl -X GET http://127.0.0.1:8001/metrics
