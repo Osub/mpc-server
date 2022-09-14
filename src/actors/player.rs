@@ -6,6 +6,7 @@ use serde::Serialize;
 use tokio::time::{self};
 
 use kv_log_macro::{debug};
+use crate::actors::msg_utils::describe_message;
 use super::messages::{IncomingMessage, MaybeProceed, OutgoingEnvelope, ProtocolError, ProtocolOutput};
 
 pub struct MpcPlayer<I: Send + Clone + Unpin + 'static, SM, M: Send, E: Send, O: Send> {
@@ -206,7 +207,7 @@ impl<I, SM> Handler<IncomingMessage<Msg<SM::MessageBody>>> for MpcPlayer<I, SM, 
         }
 
         debug!("Received message", {
-            protocolMessage: serde_json::to_string(&msg.message).unwrap(),
+            protocolMessage: describe_message(&serde_json::to_string(&msg.message).unwrap()),
             round_before: round_before,
             round_after: self.state.current_round(),
             state: format!("\"{:?}\"", self.state)

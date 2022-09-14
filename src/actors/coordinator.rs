@@ -22,6 +22,7 @@ use secp256k1::{PublicKey, SecretKey};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
+use crate::actors::msg_utils::describe_message;
 
 use crate::core::{MpcGroup, PublicKeyGroup, ResponsePayload};
 
@@ -211,7 +212,7 @@ impl Coordinator {
     fn retry(&mut self, envelope: RetryEnvelope, ctx: &mut Context<Self>) {
         if envelope.attempts > 5 {
             prom::COUNTER_MESSAGES_DROPPED.inc();
-            log::error!("reached max retries", {protocolMessage: envelope.message});
+            log::error!("reached max retries", {room: format!("\"{}\"", &envelope.room), protocolMessage: describe_message(&envelope.message)});
         } else {
             ctx.run_later(Duration::from_secs(2_u32.pow(envelope.attempts as u32) as u64), move |_, _ctx| {
                 _ctx.notify(envelope);
@@ -233,7 +234,7 @@ impl Coordinator {
             log::debug!("Coordinator routing message", {
                 handled_by: format!("\"{}\"", &handled_by),
                 room: format!("\"{}\"", &room),
-                protocolMessage: message
+                protocolMessage: describe_message(&message)
             });
         }
 
@@ -276,8 +277,7 @@ impl Coordinator {
             critical_section::<Self, _>(async {
                 let mut sink = with_ctx(|actor: &mut Self, _| actor.sink.take())
                     .expect("Sink to be present");
-
-                log::debug!("Sending message", { protocolMessage: serde_json::to_string(&envelope).unwrap()});
+                log::debug!("Sending message", { room: format!("\"{}\"", &envelope.room), protocolMessage: describe_message(&envelope.message)});
                 // Send the request
                 let _ = sink.send(Envelope {
                     room: envelope.room,
@@ -544,7 +544,7 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coo
 
     fn handle(&mut self, msg: ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>, ctx: &mut Context<Self>) {
         prom::COUNTER_REQUESTS_SIGN_DONE.inc();
-        log::info!("output public key", { room: format!("{:?}", msg.input.room), publicKey: format!("\"{}\"", hex::encode(msg.output.public_key().to_bytes(true).as_ref()))} );
+        log::info!("output public key", { room: format!("{:?}", &msg.input.room), publicKey: format!("\"{}\"", hex::encode(msg.output.public_key().to_bytes(true).as_ref()))} );
 
         self.offline_state_runners.remove(msg.input.room.as_str());
         let do_it = || -> Result<()>{
