@@ -18,18 +18,18 @@ use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::Signature
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{Error as KeygenError, Keygen, LocalKey, ProtocolMessage as KeygenProtocolMessage};
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{CompletedOfflineStage, Error as OfflineStageError, Error, OfflineProtocolMessage, OfflineStage, PartialSignature};
 use round_based::{Msg, StateMachine};
-use secp256k1::{PublicKey, SecretKey};
+use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
-use crate::actors::msg_utils::describe_message;
 
+use crate::actors::msg_utils::describe_message;
 use crate::core::{MpcGroup, PublicKeyGroup, ResponsePayload};
+use crate::prom;
 
 use super::messages::*;
 use super::MpcPlayer;
 use super::Signer;
-use crate::prom;
 
 #[derive(Debug, Error)]
 enum GroupError {
@@ -123,7 +123,7 @@ impl Coordinator {
                 if receiver != group.get_i() {
                     return Err(RoutingError::NotForMe.into());
                 }
-                return Ok(())
+                return Ok(());
             }
             None => {
                 Ok(())
@@ -244,6 +244,8 @@ impl Coordinator {
                 message,
                 initial_timestamp: init_ts,
                 attempts: attempts + 1,
+                check_passed: true,
+                sender_public_key: "".to_string(),
             }, ctx);
         }
     }
@@ -258,16 +260,49 @@ impl Coordinator {
                         self.handle_incoming_unsafe(msg.room, transformedMsg.message, current_timestamp(), 0, ctx);
                     }
                     Err(e) => {
-                        prom::COUNTER_MESSAGES_INVALID.inc();
-                        prom::COUNTER_MESSAGES_INVALID_ENCRYPTION.inc();
                         log::error!("Failed to decrypt message", {protocolMessage: serde_json::to_string(&msg).unwrap()});
                     }
                 }
             }
             Err(e) => {
-                prom::COUNTER_MESSAGES_INVALID.inc();
-                log::debug!("Failed to validate sender and receiver. {:?}", e)
-                // Do nothing
+                self.retry(RetryEnvelope {
+                    room: msg.room,
+                    message: msg.message,
+                    initial_timestamp: current_timestamp(),
+                    attempts: 1,
+                    check_passed: false,
+                    sender_public_key: msg.sender_public_key,
+                }, ctx);
+            }
+        }
+    }
+    //maybe_decrypt(&mut self, msg: &mut IncomingEnvelope)
+    fn precheck_message(&mut self, msg: &mut IncomingEnvelope) -> Result<()> {
+        let _ = self.valid_sender_and_receiver(msg.clone())?;
+        let _ = self.maybe_decrypt(msg)?;
+        Ok(())
+    }
+
+    fn handle_retry(&mut self, msg: RetryEnvelope, ctx: &mut Context<Self>) {
+        let mut adapted_envelope = IncomingEnvelope {
+            room: msg.room.clone(),
+            message: msg.message.clone(),
+            sender_public_key: msg.sender_public_key.clone(),
+        };
+
+        match self.precheck_message(&mut adapted_envelope) {
+            Ok(()) => {
+                self.handle_incoming_unsafe(adapted_envelope.room, adapted_envelope.message, msg.initial_timestamp, msg.attempts, ctx);
+            }
+            Err(e) => {
+                self.retry(RetryEnvelope {
+                    room: msg.room,
+                    message: msg.message,
+                    initial_timestamp: msg.initial_timestamp,
+                    attempts: msg.attempts + 1,
+                    check_passed: false,
+                    sender_public_key: msg.sender_public_key,
+                }, ctx);
             }
         }
     }
@@ -387,6 +422,12 @@ impl Handler<SignRequest> for Coordinator {
         );
         // let public_keys = local_share.public_keys;
         // public_keys.iter().position(|&r| *r == k)
+        let subgroup = PublicKeyGroup::new(
+            req.participant_public_keys.clone(),
+            local_share.share.t,
+            req.own_public_key.clone(),
+        );
+        let _ = self.save_group(subgroup.clone());
         let indices: Vec<Option<usize>> = req.participant_public_keys.clone().into_iter().map(
             |k| group.get_index(&k)
         ).collect();
@@ -407,9 +448,8 @@ impl Handler<SignRequest> for Coordinator {
             request_status: "PROCESSING".to_owned(),
         });
         let index_in_group = group.get_i();
-        let index_in_s_l = s_l.iter().position(|&x| x == index_in_group).unwrap() as u16 + 1;
-        let group_id = group.get_group_id();
-        let room = req.request_id.clone() + "@" + group_id.clone().as_str();
+        let index_in_s_l = subgroup.get_i();
+        let room = req.request_id.clone() + "@" + subgroup.get_group_id().clone().as_str();
 
         let req = EnrichedSignRequest {
             inner: req,
@@ -450,6 +490,8 @@ impl Handler<ProtocolError<KeygenError, Msg<KeygenProtocolMessage>>> for Coordin
                     message,
                     initial_timestamp: current_timestamp(),
                     attempts: 1,
+                    check_passed: true,
+                    sender_public_key: "".to_string(),
                 }, ctx);
             }
             _ => {}
@@ -470,6 +512,8 @@ impl Handler<ProtocolError<OfflineStageError, Msg<OfflineProtocolMessage>>> for 
                     message,
                     initial_timestamp: current_timestamp(),
                     attempts: 1,
+                    check_passed: true,
+                    sender_public_key: "".to_string(),
                 }, ctx);
             }
             _ => {}
@@ -626,7 +670,11 @@ impl Handler<RetryEnvelope> for Coordinator
     type Result = ();
 
     fn handle(&mut self, msg: RetryEnvelope, ctx: &mut Context<Self>) {
-        self.handle_incoming_unsafe(msg.room, msg.message, msg.initial_timestamp, msg.attempts, ctx);
+        if msg.check_passed {
+            self.handle_incoming_unsafe(msg.room, msg.message, msg.initial_timestamp, msg.attempts, ctx);
+        } else {
+            self.handle_retry(msg, ctx);
+        }
     }
 }
 

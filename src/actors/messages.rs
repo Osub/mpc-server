@@ -65,6 +65,8 @@ pub struct RetryEnvelope {
     pub message: String,
     pub initial_timestamp: u128,
     pub attempts: u16,
+    pub check_passed: bool,
+    pub sender_public_key: String,
 }
 
 #[derive(Message, Serialize, Deserialize, Clone)]
@@ -134,5 +136,5 @@ pub struct GenericProtocolMessage {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Encrypted {
-    pub encrypted: String
+    pub encrypted: String,
 }
