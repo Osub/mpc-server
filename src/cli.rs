@@ -3,10 +3,10 @@ use std::path::PathBuf;
 
 use structopt::StructOpt;
 
-#[derive(StructOpt, Debug)]
+#[derive(StructOpt, Clone, Debug)]
 pub struct Cli {
-    #[structopt(short, long, default_value = "http://localhost:8000/")]
-    pub messenger_address: surf::Url,
+    #[structopt(short, long)]
+    pub messenger_address: Option<surf::Url>,
 
     #[structopt(short, long, default_value = "127.0.0.1")]
     pub address: IpAddr,

@@ -2,6 +2,7 @@ extern crate base64;
 extern crate json_env_logger;
 
 use std::borrow::Borrow;
+use std::future::Future;
 use std::path::PathBuf;
 
 use actix::prelude::*;
@@ -13,7 +14,7 @@ use either::Either;
 use prometheus::{Encoder, TextEncoder};
 use secp256k1::{PublicKey, SecretKey};
 use structopt::StructOpt;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use cli::Cli;
 
@@ -53,17 +54,17 @@ async fn metrics() -> impl Responder {
 
     let metric_families = prometheus::gather();
     match encoder.encode(&metric_families, &mut buffer) {
-        Ok(_)=>{
+        Ok(_) => {
             match String::from_utf8(buffer.clone()) {
-                Ok(output)=>{
+                Ok(output) => {
                     HttpResponse::Ok().body(output)
                 }
-                Err(_)=>{
+                Err(_) => {
                     HttpResponse::InternalServerError().body("Failed to encode metrics.")
                 }
             }
         }
-        Err(_)=>{
+        Err(_) => {
             HttpResponse::InternalServerError().body("Failed to encode metrics.")
         }
     }
@@ -149,44 +150,70 @@ fn get_secret_key(path: PathBuf, password: String) -> Result<(SecretKey, PublicK
     Ok((sk, pk))
 }
 
+fn precheck(args: Cli) -> impl Future<Output=()> {
+    async {
+        match args.messenger_address {
+            Some(_) => {
+                surf::get(args.messenger_address.unwrap().clone().join("healthcheck").unwrap())
+                    .await.unwrap();
+            }
+            None => { () }
+        }
+    }
+}
+
+fn bootstrap(args: Cli, mut rx: UnboundedReceiver<Payload>, tx_res: UnboundedSender<ResponsePayload>) -> impl Future<Output=()> {
+    async {
+        match args.messenger_address {
+            Some(_) => {
+                use_messenger(args, rx, tx_res).await;
+            }
+            _ => {
+                ()
+            }
+        }
+    }
+}
+
+async fn use_messenger(args: Cli, mut rx: UnboundedReceiver<Payload>, tx_res: UnboundedSender<ResponsePayload>) {
+    let (sk, pk) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't get secret key.").unwrap();
+    let own_public_key = hex::encode(pk.serialize_compressed());
+    let local_shares_path = args.db_path.join("local_shares");
+    let local_share_db: sled::Db = sled::open(local_shares_path).unwrap();
+
+    match join_computation(args.messenger_address.unwrap(), sk.clone()).await {
+        Ok((incoming, outgoing)) => {
+            let coordinator = Coordinator::new(sk, tx_res, local_share_db, incoming, outgoing);
+            while let Some(payload) = rx.recv().await {
+                handle(&coordinator, own_public_key.clone(), payload).await;
+            }
+        }
+        Err(_) => {}
+    };
+}
+
+async fn handle_response(results_db: sled::Db, mut rx_res: UnboundedReceiver<ResponsePayload>) {
+    while let Some(response) = rx_res.recv().await {
+        let _ = save_result(&results_db, response);
+    }
+}
+
 fn main() -> std::io::Result<()> {
     json_env_logger::init();
     let args: Cli = Cli::from_args();
     let (tx, mut rx) = unbounded_channel::<Payload>();
     let (tx_res, mut rx_res) = unbounded_channel::<ResponsePayload>();
-    let sys = actix::System::new();
-    let (sk, pk) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't get secret key.").unwrap();
-    let own_public_key = hex::encode(pk.serialize_compressed());
+
     let results_path = args.db_path.join("results");
     let results_db: sled::Db = sled::open(results_path).unwrap();
-    let local_shares_path = args.db_path.join("local_shares");
-    let local_share_db: sled::Db = sled::open(local_shares_path).unwrap();
-    let tx_res1 = tx_res.clone();
+
+    let sys = actix::System::new();
     sys.block_on(async {
-        surf::get(args.messenger_address.clone().join("healthcheck").unwrap())
-            .await.unwrap()
+        precheck(args.clone())
     });
-    let s = async move {
-        match join_computation(args.messenger_address, sk.clone()).await {
-            Ok((incoming, outgoing)) => {
-                let coordinator = Coordinator::new(sk, tx_res1, local_share_db, incoming, outgoing);
-                while let Some(payload) = rx.recv().await {
-                    handle(&coordinator, own_public_key.clone(), payload).await;
-                }
-            }
-            Err(_) => {}
-        }
-    };
 
-    let results_db1 = results_db.clone();
-    let handle_response = async move {
-        while let Some(response) = rx_res.recv().await {
-            let _ = save_result(&results_db1, response);
-        }
-    };
-
-    Arbiter::new().spawn(s);
-    Arbiter::new().spawn(handle_response);
+    Arbiter::new().spawn(bootstrap(args.clone(), rx, tx_res.clone()));
+    Arbiter::new().spawn(handle_response(results_db.clone(), rx_res));
 
     let server = move || {
         HttpServer::new(move || {
