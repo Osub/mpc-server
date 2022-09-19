@@ -14,7 +14,7 @@ enum VerifyError {
     Failed,
 }
 
-fn parse_signed(msg: String)->Result<SignedEnvelope<String>> {
+pub fn parse_signed(msg: String)->Result<SignedEnvelope<String>> {
     let signed = serde_json::from_str::<SignedEnvelope<String>>(&msg).context("deserialize message")?;
     let send_pk_str = signed.sender_public_key.clone();
     let bytes = hex::decode(send_pk_str).context("Wrong pub key")?;
@@ -37,7 +37,7 @@ fn parse_signed(msg: String)->Result<SignedEnvelope<String>> {
     Ok(out)
 }
 
-fn sign_envelope(key: &SecretKey, pub_key: &String, envelope: Envelope) -> Result<SignedEnvelope<String>> {
+pub fn sign_envelope(key: &SecretKey, pub_key: &String, envelope: Envelope) -> Result<SignedEnvelope<String>> {
     let mut hasher = Sha256::new();
     hasher.update(envelope.message.as_bytes());
     let hash = hasher.finalize();

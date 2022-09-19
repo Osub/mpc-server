@@ -29,6 +29,7 @@ mod cli;
 mod transport;
 mod key;
 mod prom;
+mod redis;
 
 
 struct AppState {
