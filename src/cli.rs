@@ -8,6 +8,9 @@ pub struct Cli {
     #[structopt(short, long)]
     pub messenger_address: Option<surf::Url>,
 
+    #[structopt(short, long)]
+    pub redis_url: Option<String>,
+
     #[structopt(short, long, default_value = "127.0.0.1")]
     pub address: IpAddr,
 

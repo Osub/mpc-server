@@ -33,7 +33,7 @@ impl RedisClient {
     async fn subscribe(&mut self) -> Result<impl Stream<Item=Result<String>>> {
         let conn = self.client.get_async_connection().await?;
         let mut pubsub = conn.into_pubsub();
-        pubsub.subscribe(&self.channel_name);
+        pubsub.subscribe(&self.channel_name).await?;
         let stream = pubsub.into_on_message().map(|msg: Msg| {
             match msg.get_payload::<String>() {
                 Ok(msg) => {
