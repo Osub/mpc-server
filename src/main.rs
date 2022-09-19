@@ -150,27 +150,23 @@ fn get_secret_key(path: PathBuf, password: String) -> Result<(SecretKey, PublicK
     Ok((sk, pk))
 }
 
-fn precheck(args: Cli) -> impl Future<Output=()> {
-    async {
-        match args.messenger_address {
-            Some(_) => {
-                surf::get(args.messenger_address.unwrap().clone().join("healthcheck").unwrap())
-                    .await.unwrap();
-            }
-            None => { () }
+async fn precheck(args: Cli) {
+    match args.messenger_address {
+        Some(_) => {
+            surf::get(args.messenger_address.unwrap().clone().join("healthcheck").unwrap())
+                .await.unwrap(); // panics if query failed
         }
+        None => { () }
     }
 }
 
-fn bootstrap(args: Cli, mut rx: UnboundedReceiver<Payload>, tx_res: UnboundedSender<ResponsePayload>) -> impl Future<Output=()> {
-    async {
-        match args.messenger_address {
-            Some(_) => {
-                use_messenger(args, rx, tx_res).await;
-            }
-            _ => {
-                ()
-            }
+async fn bootstrap(args: Cli, mut rx: UnboundedReceiver<Payload>, tx_res: UnboundedSender<ResponsePayload>) {
+    match args.messenger_address {
+        Some(_) => {
+            use_messenger(args, rx, tx_res).await;
+        }
+        _ => {
+            ()
         }
     }
 }
