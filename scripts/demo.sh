@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-export RUST_LOG="warn,mpc_server=debug"
+export RUST_LOG="debug"
 
 USE_REDIS=$1
 MQ_CONFIG=$([[ ! -z "$USE_REDIS" ]] && echo "-r redis://localhost/" || echo "-m http://127.0.0.1:8000")

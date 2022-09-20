@@ -1,9 +1,11 @@
 extern crate base64;
 extern crate json_env_logger;
+
 use std::borrow::Borrow;
 use std::future::Future;
 use std::path::PathBuf;
 
+use ::redis::{Client, Commands, ConnectionLike};
 use actix::prelude::*;
 use actix_web::{App, HttpResponse, HttpServer, middleware, Responder, web};
 use anyhow::{Context, Result};
@@ -13,6 +15,7 @@ use either::Either;
 use prometheus::{Encoder, TextEncoder};
 use secp256k1::{PublicKey, SecretKey};
 use structopt::StructOpt;
+use thiserror::Error;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use cli::Cli;
@@ -31,6 +34,14 @@ mod key;
 mod prom;
 mod redis;
 
+#[derive(Debug, Error)]
+enum SetupError {
+    #[error("Unable to connect to message queue.")]
+    NoMessageQueueConnection,
+
+    #[error("Multiple message queue has been configured.")]
+    MultipleMessageQueueConfigured,
+}
 
 struct AppState {
     tx: UnboundedSender<Payload>,
@@ -151,13 +162,27 @@ fn get_secret_key(path: PathBuf, password: String) -> Result<(SecretKey, PublicK
     Ok((sk, pk))
 }
 
-async fn precheck(args: Cli) {
-    match args.messenger_address {
-        Some(_) => {
-            surf::get(args.messenger_address.unwrap().clone().join("healthcheck").unwrap())
-                .await.unwrap(); // panics if query failed
+async fn precheck(args: Cli) -> Result<()> {
+    let args0 = args.clone();
+    match (args0.messenger_address, args0.redis_url) {
+        (Some(url), None) => {
+            let url = url.join("healthcheck")?;
+            let res = surf::get(url).await;
+            res.map_err(|_| {
+                SetupError::NoMessageQueueConnection
+            })?;
+            Ok(())
         }
-        None => { () }
+        (None, Some(url)) => {
+            let client = Client::open(url)?;
+            client.get_connection().map_err(|_|{
+                SetupError::NoMessageQueueConnection
+            })?;
+            Ok(())
+        }
+        _ => {
+            Err(SetupError::MultipleMessageQueueConfigured.into())
+        }
     }
 }
 
@@ -228,7 +253,7 @@ fn main() -> std::io::Result<()> {
 
     let sys = actix::System::new();
     sys.block_on(async {
-        precheck(args.clone())
+        precheck(args.clone()).await.unwrap();
     });
 
     Arbiter::new().spawn(bootstrap(args.clone(), rx, tx_res.clone()));
