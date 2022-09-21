@@ -37,7 +37,7 @@ pub fn parse_signed(msg: String)->Result<SignedEnvelope<String>> {
     Ok(out)
 }
 
-pub fn sign_envelope(key: &SecretKey, pub_key: &String, envelope: Envelope) -> Result<SignedEnvelope<String>> {
+pub fn sign_envelope(key: &SecretKey, pub_key: &str, envelope: Envelope) -> Result<SignedEnvelope<String>> {
     let mut hasher = Sha256::new();
     hasher.update(envelope.message.as_bytes());
     let hash = hasher.finalize();
@@ -48,7 +48,7 @@ pub fn sign_envelope(key: &SecretKey, pub_key: &String, envelope: Envelope) -> R
     let signed = SignedEnvelope {
         room: envelope.room,
         message: envelope.message,
-        sender_public_key: pub_key.clone(),
+        sender_public_key: pub_key.to_string(),
         signature,
     };
     Ok(signed)

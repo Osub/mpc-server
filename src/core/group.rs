@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub trait MpcGroup {
-    fn valid_msg<T>(&self, sender_public_key: &String, msg: &Msg<T>) -> bool;
+    fn valid_msg<T>(&self, sender_public_key: &str, msg: &Msg<T>) -> bool;
     fn get_i(&self) -> u16;
     fn get_t(&self) -> u16;
     fn get_n(&self) -> u16;
@@ -72,13 +72,13 @@ impl PublicKeyGroup {
         Ok(plaintext.to_string())
     }
 
-    pub fn get_index(&self, public_key: &String) -> Option<usize> {
+    pub fn get_index(&self, public_key: &str) -> Option<usize> {
         self.public_keys.iter().position(|pk| *pk == *public_key).map(|i| i + 1)
     }
 }
 
 impl MpcGroup for PublicKeyGroup {
-    fn valid_msg<T>(&self, sender_public_key: &String, _msg: &Msg<T>) -> bool {
+    fn valid_msg<T>(&self, sender_public_key: &str, _msg: &Msg<T>) -> bool {
         let ind = self.get_index(sender_public_key);
         // ind.map_or(false, |i| i == (msg.sender as usize))
         // TODO: How do we ensure claimed index is correct?

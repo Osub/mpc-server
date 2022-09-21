@@ -1,11 +1,11 @@
 use actix::prelude::*;
 use anyhow::Result;
 use curv::BigInt;
+use kv_log_macro as log;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::SignatureRecid;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{CompletedOfflineStage, PartialSignature, SignManual};
 use round_based::Msg;
 
-use kv_log_macro as log;
 use super::messages::{IncomingMessage, OutgoingEnvelope, ProtocolOutput};
 
 pub struct Signer<I: Send> {
@@ -60,16 +60,14 @@ impl<I> Signer<I>
             receiver: None,
             body: partial_sig,
         };
-        match serde_json::to_string(&sig_msg) {
-            Ok(serialized) => {
-                // log::debug!("Sending message {:?}", serde_json::to_string(&sig_msg));
-                let _ = self.message_broker.do_send(OutgoingEnvelope {
-                    room: self.room.clone(),
-                    message: serialized,
-                });
-            }
-            Err(_) => {}
-        };
+        if let Ok(serialized) = serde_json::to_string(&sig_msg) {
+            // log::debug!("Sending message {:?}", serde_json::to_string(&sig_msg));
+            let _ = self.message_broker.do_send(OutgoingEnvelope {
+                room: self.room.clone(),
+                message: serialized,
+            });
+        }
+
         Ok(())
     }
 
@@ -82,17 +80,12 @@ impl<I> Signer<I>
         )?;
 
         if self.partial_sigs.len() == self.t {
-            match state.complete(&self.partial_sigs) {
-                Ok(signature) => {
-                    let _ = self.result_collector.do_send(ProtocolOutput {
-                        input: self.input.clone(),
-                        output: signature,
-                    });
-                }
-                Err(_) => {
-                    //TODO: Handle error.
-                }
-            };
+            if let Ok(signature) = state.complete(&self.partial_sigs) {
+                let _ = self.result_collector.do_send(ProtocolOutput {
+                    input: self.input.clone(),
+                    output: signature,
+                });
+            }
         }
         Ok(())
     }

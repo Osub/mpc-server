@@ -1,12 +1,14 @@
-use std::time::Duration;
 use std::fmt::Debug;
+use std::time::Duration;
+
 use actix::prelude::*;
+use kv_log_macro::debug;
 use round_based::{Msg, StateMachine};
 use serde::Serialize;
 use tokio::time::{self};
 
-use kv_log_macro::{debug};
 use crate::actors::msg_utils::describe_message;
+
 use super::messages::{IncomingMessage, MaybeProceed, OutgoingEnvelope, ProtocolError, ProtocolOutput};
 
 pub struct MpcPlayer<I: Send + Clone + Unpin + 'static, SM, M: Send, E: Send, O: Send> {
@@ -113,15 +115,11 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         }
 
         for msg in self.state.message_queue().drain(..) {
-            match serde_json::to_string(&msg) {
-                Ok(serialized) => {
-
-                    let _ = self.message_broker.do_send(OutgoingEnvelope {
-                        room: self.room.clone(),
-                        message: serialized,
-                    });
-                }
-                Err(_) => {}
+            if let Ok(serialized) = serde_json::to_string(&msg) {
+                let _ = self.message_broker.do_send(OutgoingEnvelope {
+                    room: self.room.clone(),
+                    message: serialized,
+                });
             }
         }
     }
@@ -163,7 +161,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         }
         self.send_outgoing(ctx);
         self.refresh_timer();
-        self.finish_if_possible();
+        let _ = self.finish_if_possible();
         Ok(())
     }
 }
@@ -196,11 +194,8 @@ impl<I, SM> Handler<IncomingMessage<Msg<SM::MessageBody>>> for MpcPlayer<I, SM, 
         }
         self.msg_count += 1;
         self.handle_incoming(msg.message.clone());
-        match self.maybe_proceed(ctx) {
-            Err(e) => {
-                self.send_error(e, msg.message.clone())
-            }
-            _ => {}
+        if let Err(e) = self.maybe_proceed(ctx) {
+            self.send_error(e, msg.message.clone())
         }
 
         debug!("Received message", {
@@ -227,7 +222,7 @@ impl<I, SM> Handler<MaybeProceed> for MpcPlayer<I, SM, SM::MessageBody, SM::Err,
     fn handle(&mut self, _: MaybeProceed, ctx: &mut Context<Self>) {
         if self.msg_count == 0 {
             // log::debug!("Try to proceed");
-            self.maybe_proceed(ctx);
+            let _ = self.maybe_proceed(ctx);
             ctx.run_later(Duration::from_millis(250), |_, _ctx| {
                 _ctx.address().do_send(MaybeProceed {});
             });

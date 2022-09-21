@@ -2,10 +2,9 @@ extern crate base64;
 extern crate json_env_logger;
 
 
-
 use std::path::PathBuf;
 
-use ::redis::{Client, Commands};
+use ::redis::Client;
 use actix::prelude::*;
 use actix_web::{App, HttpResponse, HttpServer, middleware, Responder, web};
 use anyhow::{Context, Result};
@@ -175,7 +174,7 @@ async fn precheck(args: Cli) -> Result<()> {
         }
         (None, Some(url)) => {
             let client = Client::open(url)?;
-            client.get_connection().map_err(|_|{
+            client.get_connection().map_err(|_| {
                 SetupError::NoMessageQueueConnection
             })?;
             Ok(())
@@ -207,14 +206,11 @@ async fn use_messenger(args: Cli, mut rx: UnboundedReceiver<Payload>, tx_res: Un
     let local_shares_path = args.db_path.join("local_shares");
     let local_share_db: sled::Db = sled::open(local_shares_path).unwrap();
 
-    match join_computation(args.messenger_address.unwrap(), sk.clone()).await {
-        Ok((incoming, outgoing)) => {
-            let coordinator = Coordinator::new(sk, tx_res, local_share_db, incoming, outgoing);
-            while let Some(payload) = rx.recv().await {
-                handle(&coordinator, own_public_key.clone(), payload).await;
-            }
+    if let Ok((incoming, outgoing)) = join_computation(args.messenger_address.unwrap(), sk.clone()).await {
+        let coordinator = Coordinator::new(sk, tx_res, local_share_db, incoming, outgoing);
+        while let Some(payload) = rx.recv().await {
+            handle(&coordinator, own_public_key.clone(), payload).await;
         }
-        Err(_) => {}
     };
 }
 
@@ -225,14 +221,11 @@ async fn use_redis(args: Cli, mut rx: UnboundedReceiver<Payload>, tx_res: Unboun
     let local_shares_path = args.db_path.join("local_shares");
     let local_share_db: sled::Db = sled::open(local_shares_path).unwrap();
 
-    match join_computation_via_redis(args.redis_url.unwrap(), sk.clone()).await {
-        Ok((incoming, outgoing)) => {
-            let coordinator = Coordinator::new(sk, tx_res, local_share_db, incoming, outgoing);
-            while let Some(payload) = rx.recv().await {
-                handle(&coordinator, own_public_key.clone(), payload).await;
-            }
+    if let Ok((incoming, outgoing)) = join_computation_via_redis(args.redis_url.unwrap(), sk.clone()).await {
+        let coordinator = Coordinator::new(sk, tx_res, local_share_db, incoming, outgoing);
+        while let Some(payload) = rx.recv().await {
+            handle(&coordinator, own_public_key.clone(), payload).await;
         }
-        Err(_) => {}
     };
 }
 

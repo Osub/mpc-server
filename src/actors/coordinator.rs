@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-
 use std::ops::Deref;
 use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -138,10 +137,10 @@ impl Coordinator {
                 let group_id = self.get_group_id(&msg.room).context("extract group_id")?;
                 let group = self.retrieve_group(group_id.to_string()).context("Retrieve group.")?;
                 let encrypted = group.encrypt(receiver as usize, m.body.to_string().as_str()).context("encrypt")?;
-                let encryptedMessage = Encrypted {
+                let encrypted_message = Encrypted {
                     encrypted,
                 };
-                let body = serde_json::to_string(&encryptedMessage).context("stringify Encrypted")?;
+                let body = serde_json::to_string(&encrypted_message).context("stringify Encrypted")?;
                 let body = serde_json::value::RawValue::from_string(body).context("convert to RawValue")?;
                 m.body = body;
                 let m = serde_json::to_string(&m).context("convert to string")?;
@@ -158,11 +157,11 @@ impl Coordinator {
         let mut m = serde_json::from_str::<GenericProtocolMessage>(&msg.message).context("parse GenericProtocolMessage")?;
         match m.receiver {
             Some(_) => {
-                let encryptedMessage =
+                let encrypted_message =
                     serde_json::from_str::<Encrypted>(m.body.to_string().as_ref()).context("parse encrypted")?;
 
                 let decrypted =
-                    PublicKeyGroup::decrypt(self.sk.as_ref(), encryptedMessage.encrypted.as_str()).context("decrypt")?;
+                    PublicKeyGroup::decrypt(self.sk.as_ref(), encrypted_message.encrypted.as_str()).context("decrypt")?;
 
                 let decrypted = serde_json::value::RawValue::from_string(decrypted).context("convert to RawValue")?;
                 m.body = decrypted;
@@ -176,29 +175,29 @@ impl Coordinator {
         }
     }
 
-    fn handle_incoming_keygen(&mut self, room: &String, message: &String, _: &mut Context<Self>) -> Result<()> {
+    fn handle_incoming_keygen(&mut self, room: &str, message: &str, _: &mut Context<Self>) -> Result<()> {
         let addr = self.keygen_runners.get(room).context("Can't found mpc player.")?;
         let msg = serde_json::from_str::<Msg<KeygenProtocolMessage>>(message).context("deserialize message")?;
         addr.do_send(IncomingMessage {
-            room: room.clone(),
+            room: room.to_string(),
             message: msg,
         });
         prom::COUNTER_MESSAGES_KEYGEN_HANDLED.inc();
         Ok(())
     }
 
-    fn handle_incoming_offline(&mut self, room: &String, message: &String, _: &mut Context<Self>) -> Result<()> {
+    fn handle_incoming_offline(&mut self, room: &str, message: &str, _: &mut Context<Self>) -> Result<()> {
         let addr = self.offline_state_runners.get(room).context("Not found mpc player.")?;
         let msg = serde_json::from_str::<Msg<OfflineProtocolMessage>>(message).context("deserialize message")?;
         addr.do_send(IncomingMessage {
-            room: room.clone(),
+            room: room.to_string(),
             message: msg,
         });
         prom::COUNTER_MESSAGES_OFFLINE_HANDLED.inc();
         Ok(())
     }
 
-    fn handle_incoming_sign(&mut self, room: &String, message: &String, _: &mut Context<Self>) -> Result<()> {
+    fn handle_incoming_sign(&mut self, room: &String, message: &str, _: &mut Context<Self>) -> Result<()> {
         let addr = self.signers.get(room).context("Not found signer.")?;
         let msg = serde_json::from_str::<Msg<PartialSignature>>(message).context("deserialize message")?;
         addr.do_send(IncomingMessage {
@@ -254,10 +253,10 @@ impl Coordinator {
         prom::COUNTER_MESSAGES_TOTAL_RECEIVED.inc();
         match self.valid_sender_and_receiver(msg.clone()) {
             Ok(()) => {
-                let mut transformedMsg = msg.clone();
-                match self.maybe_decrypt(&mut transformedMsg) {
+                let mut transformed = msg.clone();
+                match self.maybe_decrypt(&mut transformed) {
                     Ok(_) => {
-                        self.handle_incoming_unsafe(msg.room, transformedMsg.message, current_timestamp(), 0, ctx);
+                        self.handle_incoming_unsafe(msg.room, transformed.message, current_timestamp(), 0, ctx);
                     }
                     Err(_e) => {
                         log::error!("Failed to decrypt message", {protocolMessage: serde_json::to_string(&msg).unwrap()});
@@ -426,10 +425,9 @@ impl Handler<SignRequest> for Coordinator {
             req.own_public_key.clone(),
         );
         let _ = self.save_group(subgroup.clone());
-        let indices: Vec<Option<usize>> = req.participant_public_keys.clone().into_iter().map(
+        let (indices, errors): (Vec<Option<usize>>, Vec<_>) = req.participant_public_keys.clone().into_iter().map(
             |k| group.get_index(&k)
-        ).collect();
-        let (indices, errors): (Vec<Option<usize>>, Vec<_>) = indices.into_iter().partition(Option::is_some);
+        ).partition(Option::is_some);
 
         let s_l: Vec<u16> = if indices.len() != (local_share.share.t + 1) as usize {
             Err(GroupError::WrongNumberOfParticipants)
@@ -480,19 +478,16 @@ impl Handler<ProtocolError<KeygenError, Msg<KeygenProtocolMessage>>> for Coordin
 
     fn handle(&mut self, msg: ProtocolError<KeygenError, Msg<KeygenProtocolMessage>>, ctx: &mut Context<Self>) {
         log::info!("Error {:?}", msg.error);
-        match msg.error {
-            KeygenError::ReceivedOutOfOrderMessage { current_round: _, msg_round: _ } => {
-                let message = serde_json::to_string(&msg.message).unwrap();
-                self.retry(RetryEnvelope {
-                    room: msg.room,
-                    message,
-                    initial_timestamp: current_timestamp(),
-                    attempts: 1,
-                    check_passed: true,
-                    sender_public_key: "".to_string(),
-                }, ctx);
-            }
-            _ => {}
+        if let KeygenError::ReceivedOutOfOrderMessage { current_round: _, msg_round: _ } = msg.error {
+            let message = serde_json::to_string(&msg.message).unwrap();
+            self.retry(RetryEnvelope {
+                room: msg.room,
+                message,
+                initial_timestamp: current_timestamp(),
+                attempts: 1,
+                check_passed: true,
+                sender_public_key: "".to_string(),
+            }, ctx);
         }
     }
 }
@@ -502,19 +497,16 @@ impl Handler<ProtocolError<OfflineStageError, Msg<OfflineProtocolMessage>>> for 
 
     fn handle(&mut self, msg: ProtocolError<OfflineStageError, Msg<OfflineProtocolMessage>>, ctx: &mut Context<Self>) {
         log::info!("Error {:?}", msg.error);
-        match msg.error {
-            OfflineStageError::ReceivedOutOfOrderMessage { current_round: _, msg_round: _ } => {
-                let message = serde_json::to_string(&msg.message).unwrap();
-                self.retry(RetryEnvelope {
-                    room: msg.room,
-                    message,
-                    initial_timestamp: current_timestamp(),
-                    attempts: 1,
-                    check_passed: true,
-                    sender_public_key: "".to_string(),
-                }, ctx);
-            }
-            _ => {}
+        if let OfflineStageError::ReceivedOutOfOrderMessage { current_round: _, msg_round: _ } = msg.error {
+            let message = serde_json::to_string(&msg.message).unwrap();
+            self.retry(RetryEnvelope {
+                room: msg.room,
+                message,
+                initial_timestamp: current_timestamp(),
+                attempts: 1,
+                check_passed: true,
+                sender_public_key: "".to_string(),
+            }, ctx);
         }
     }
 }
@@ -656,9 +648,8 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, SignatureRecid>> for Coordinato
 impl StreamHandler<Result<IncomingEnvelope>> for Coordinator
 {
     fn handle(&mut self, msg: Result<IncomingEnvelope>, ctx: &mut Context<Self>) {
-        match msg.context("Invalid IncomingEnvlope") {
-            Ok(msg) => { self.handle_incoming(msg, ctx); }
-            Err(_) => {}
+        if let Ok(msg) = msg.context("Invalid IncomingEnvlope") {
+            self.handle_incoming(msg, ctx);
         }
     }
 }
