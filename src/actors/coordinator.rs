@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::pin::Pin;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use actix::prelude::*;
 use actix_interop::{critical_section, FutureInterop, with_ctx};
@@ -25,6 +25,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::actors::msg_utils::describe_message;
 use crate::core::{MpcGroup, PublicKeyGroup, ResponsePayload};
 use crate::prom;
+use crate::utils;
 
 use super::messages::*;
 use super::MpcPlayer;
@@ -256,7 +257,7 @@ impl Coordinator {
                 let mut transformed = msg.clone();
                 match self.maybe_decrypt(&mut transformed) {
                     Ok(_) => {
-                        self.handle_incoming_unsafe(msg.room, transformed.message, current_timestamp(), 0, ctx);
+                        self.handle_incoming_unsafe(msg.room, transformed.message, utils::current_timestamp(), 0, ctx);
                     }
                     Err(_e) => {
                         log::error!("Failed to decrypt message", {protocolMessage: serde_json::to_string(&msg).unwrap()});
@@ -267,7 +268,7 @@ impl Coordinator {
                 self.retry(RetryEnvelope {
                     room: msg.room,
                     message: msg.message,
-                    initial_timestamp: current_timestamp(),
+                    initial_timestamp: utils::current_timestamp(),
                     attempts: 1,
                     check_passed: false,
                     sender_public_key: msg.sender_public_key,
@@ -483,7 +484,7 @@ impl Handler<ProtocolError<KeygenError, Msg<KeygenProtocolMessage>>> for Coordin
             self.retry(RetryEnvelope {
                 room: msg.room,
                 message,
-                initial_timestamp: current_timestamp(),
+                initial_timestamp: utils::current_timestamp(),
                 attempts: 1,
                 check_passed: true,
                 sender_public_key: "".to_string(),
@@ -502,7 +503,7 @@ impl Handler<ProtocolError<OfflineStageError, Msg<OfflineProtocolMessage>>> for 
             self.retry(RetryEnvelope {
                 room: msg.room,
                 message,
-                initial_timestamp: current_timestamp(),
+                initial_timestamp: utils::current_timestamp(),
                 attempts: 1,
                 check_passed: true,
                 sender_public_key: "".to_string(),
@@ -665,10 +666,4 @@ impl Handler<RetryEnvelope> for Coordinator
             self.handle_retry(msg, ctx);
         }
     }
-}
-
-fn current_timestamp() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards").as_millis()
 }
