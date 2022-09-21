@@ -22,8 +22,7 @@ use cli::Cli;
 use crate::actors::{Coordinator, handle};
 use crate::core::{KeygenPayload, Payload, ResponsePayload, SignPayload};
 use crate::key::decrypt;
-use crate::redis::join_computation_via_redis;
-use crate::transport::join_computation;
+use crate::transport::{join_computation, join_computation_via_redis};
 
 mod core;
 mod actors;
@@ -31,7 +30,6 @@ mod cli;
 mod transport;
 mod key;
 mod prom;
-mod redis;
 
 #[derive(Debug, Error)]
 enum SetupError {
