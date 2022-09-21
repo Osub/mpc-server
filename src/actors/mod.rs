@@ -3,6 +3,7 @@ mod player;
 mod coordinator;
 pub mod messages;
 mod msg_utils;
+mod types;
 
 use actix::Addr;
 pub use signer::*;

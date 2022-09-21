@@ -23,6 +23,7 @@ use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::actors::msg_utils::describe_message;
+use crate::actors::types::SignTask;
 use crate::core::{MpcGroup, PublicKeyGroup, ResponsePayload};
 use crate::prom;
 use crate::utils;
@@ -586,13 +587,16 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coo
             let message = BigInt::from_hex(msg.input.inner.message.as_ref())?;
             let completed_offline_stage = msg.output;
             let input = msg.input.clone();
-            let signer = Signer::new(
-                input.clone(),
-                input.room,
-                input.i,
-                input.s_l.len() - 1,
+            let task = SignTask {
+                room: input.room.clone(),
+                index: input.i,
+                t: input.s_l.len() - 1,
                 message,
                 completed_offline_stage,
+            };
+            let signer = Signer::new(
+                input,
+                task,
                 ctx.address().recipient(),
                 ctx.address().recipient(),
             ).start();
