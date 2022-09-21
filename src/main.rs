@@ -22,7 +22,7 @@ use cli::Cli;
 use crate::actors::{Coordinator, handle};
 use crate::core::{KeygenPayload, Payload, ResponsePayload, SignPayload};
 use crate::key::decrypt;
-use crate::transport::{join_computation, join_computation_via_redis};
+use crate::transport::{join_computation_via_messenger, join_computation_via_redis};
 
 mod core;
 mod actors;
@@ -205,7 +205,7 @@ async fn use_messenger(args: Cli, mut rx: UnboundedReceiver<Payload>, tx_res: Un
     let local_shares_path = args.db_path.join("local_shares");
     let local_share_db: sled::Db = sled::open(local_shares_path).unwrap();
 
-    if let Ok((incoming, outgoing)) = join_computation(args.messenger_address.unwrap(), sk.clone()).await {
+    if let Ok((incoming, outgoing)) = join_computation_via_messenger(args.messenger_address.unwrap(), sk.clone()).await {
         let coordinator = Coordinator::new(sk, tx_res, local_share_db, incoming, outgoing);
         while let Some(payload) = rx.recv().await {
             handle(&coordinator, own_public_key.clone(), payload).await;

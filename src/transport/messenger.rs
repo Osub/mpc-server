@@ -10,7 +10,7 @@ use crate::actors::messages::{Envelope, SignedEnvelope};
 use crate::transport::sign_envelope;
 use crate::transport::parse_signed;
 
-pub async fn join_computation(
+pub async fn join_computation_via_messenger(
     url: surf::Url,
     key: SecretKey,
 ) -> Result<(
