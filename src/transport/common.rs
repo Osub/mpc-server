@@ -1,7 +1,7 @@
 use std::convert::TryInto;
 
 use anyhow::{Context, Result};
-use futures::{Sink, Stream, StreamExt};
+
 use secp256k1::{Message, PublicKey, SecretKey, sign, Signature, verify};
 use sha2::{Digest, Sha256};
 use thiserror::Error;

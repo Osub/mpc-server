@@ -2,9 +2,9 @@ use std::convert::TryInto;
 
 use anyhow::{Context, Result};
 use futures::{Sink, Stream, StreamExt};
-use secp256k1::{Message, PublicKey, SecretKey, sign, Signature, verify};
-use sha2::{Digest, Sha256};
-use thiserror::Error;
+use secp256k1::{PublicKey, SecretKey};
+use sha2::{Digest};
+
 
 use crate::actors::messages::{Envelope, SignedEnvelope};
 use crate::transport::sign_envelope;
