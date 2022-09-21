@@ -1,11 +1,11 @@
 extern crate base64;
 extern crate json_env_logger;
 
-use std::borrow::Borrow;
-use std::future::Future;
+
+
 use std::path::PathBuf;
 
-use ::redis::{Client, Commands, ConnectionLike};
+use ::redis::{Client, Commands};
 use actix::prelude::*;
 use actix_web::{App, HttpResponse, HttpServer, middleware, Responder, web};
 use anyhow::{Context, Result};
@@ -186,7 +186,7 @@ async fn precheck(args: Cli) -> Result<()> {
     }
 }
 
-async fn bootstrap(args: Cli, mut rx: UnboundedReceiver<Payload>, tx_res: UnboundedSender<ResponsePayload>) {
+async fn bootstrap(args: Cli, rx: UnboundedReceiver<Payload>, tx_res: UnboundedSender<ResponsePayload>) {
     let args0 = args.clone();
     match (args0.messenger_address, args0.redis_url) {
         (Some(_), None) => {
@@ -245,8 +245,8 @@ async fn handle_response(results_db: sled::Db, mut rx_res: UnboundedReceiver<Res
 fn main() -> std::io::Result<()> {
     json_env_logger::init();
     let args: Cli = Cli::from_args();
-    let (tx, mut rx) = unbounded_channel::<Payload>();
-    let (tx_res, mut rx_res) = unbounded_channel::<ResponsePayload>();
+    let (tx, rx) = unbounded_channel::<Payload>();
+    let (tx_res, rx_res) = unbounded_channel::<ResponsePayload>();
 
     let results_path = args.db_path.join("results");
     let results_db: sled::Db = sled::open(results_path).unwrap();

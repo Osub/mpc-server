@@ -32,10 +32,10 @@ pub fn describe_message(msg: &String) -> String {
     hasher.update(msg);
     let hash = hasher.finalize();
 
-    let msg = serde_json::from_str::<GenericProtocolMessage>(&msg);
+    let msg = serde_json::from_str::<GenericProtocolMessage>(msg);
     match msg {
         Ok(msg) => {
-            let body = msg.body.to_string().replace("\\", "");
+            let body = msg.body.to_string().replace('\\', "");
 
             let re = Regex::new(r#"^\{"(\w+)".*"#).unwrap();
             let body_round = re.captures(&body);
@@ -59,7 +59,7 @@ pub fn describe_message(msg: &String) -> String {
                     let desc = MsgDescriptor {
                         sender: msg.sender,
                         receiver: msg.receiver,
-                        round: round.clone(),
+                        round,
                         hash: hex::encode(hash),
                     };
                     serde_json::to_string(&desc).unwrap()

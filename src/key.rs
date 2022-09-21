@@ -8,12 +8,12 @@ use sha2::{Digest, Sha256};
 type Aes256CfbDec = Decryptor<Aes256>;
 
 pub fn decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
-    let hey_bytes: &[u8] = &*Sha256::digest(key).clone();
+    let hey_bytes: &[u8] = &*Sha256::digest(key);
     let iv_size = <Aes256CfbDec as IvSizeUser>::IvSize::to_usize();
     let iv: Vec<u8> = data.iter().take(iv_size).map(|&x| x as u8).collect::<Vec<u8>>();
     let mut buf: Vec<u8> = data.iter().skip(iv_size).map(|&x| x as u8).collect::<Vec<u8>>();
     let dec = Aes256CfbDec::new_from_slices(hey_bytes, &*iv)?;
-    let _ = dec.decrypt(&mut *buf);
+    dec.decrypt(&mut *buf);
 
     Ok(buf[iv_size..].to_vec())
 }

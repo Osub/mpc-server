@@ -20,7 +20,7 @@ fn handle_keygen(coordinator: &Addr<Coordinator>, own_public_key: String, payloa
         request_id,
         public_keys,
         t,
-        own_public_key: own_public_key.clone(),
+        own_public_key,
     });
 }
 

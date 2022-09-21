@@ -148,10 +148,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         let round_n = self.state.current_round();
         if self.current_round != Some(round_n) {
             self.current_round = Some(round_n);
-            self.deadline = match self.state.round_timeout() {
-                Some(timeout) => Some(time::Instant::now() + timeout),
-                None => None,
-            }
+            self.deadline = self.state.round_timeout().map(|timeout| time::Instant::now() + timeout)
         }
     }
 
@@ -232,7 +229,7 @@ impl<I, SM> Handler<MaybeProceed> for MpcPlayer<I, SM, SM::MessageBody, SM::Err,
             // log::debug!("Try to proceed");
             self.maybe_proceed(ctx);
             ctx.run_later(Duration::from_millis(250), |_, _ctx| {
-                let _ = _ctx.address().do_send(MaybeProceed {});
+                _ctx.address().do_send(MaybeProceed {});
             });
         } else {
             // log::debug!("Ignore proceed");

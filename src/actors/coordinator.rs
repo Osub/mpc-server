@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::future::Future;
+
 use std::ops::Deref;
 use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -16,7 +16,7 @@ use futures_util::TryStreamExt;
 use kv_log_macro as log;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::SignatureRecid;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{Error as KeygenError, Keygen, LocalKey, ProtocolMessage as KeygenProtocolMessage};
-use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{CompletedOfflineStage, Error as OfflineStageError, Error, OfflineProtocolMessage, OfflineStage, PartialSignature};
+use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{CompletedOfflineStage, Error as OfflineStageError, OfflineProtocolMessage, OfflineStage, PartialSignature};
 use round_based::{Msg, StateMachine};
 use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
@@ -106,7 +106,7 @@ impl Coordinator {
 
 
     fn get_group_id<'a>(&mut self, room: &'a str) -> Result<&'a str> {
-        let split = room.split("@").collect::<Vec<&str>>();
+        let split = room.split('@').collect::<Vec<&str>>();
         if split.len() < 2 {
             return Err(GroupError::FailedToParseGroupId.into());
         }
@@ -117,13 +117,13 @@ impl Coordinator {
         let group_id = self.get_group_id(&msg.room).context("extract group_id")?;
         let group = self.retrieve_group(group_id.to_string()).context("Retrieve group.")?;
         group.get_index(&msg.sender_public_key).map_or(Err(GroupError::WrongPublicKey), |_| Ok(())).context("Validate sender.")?;
-        let mut m = serde_json::from_str::<GenericProtocolMessage>(&msg.message).context("parse GenericProtocolMessage")?;
+        let m = serde_json::from_str::<GenericProtocolMessage>(&msg.message).context("parse GenericProtocolMessage")?;
         match m.receiver {
             Some(receiver) => {
                 if receiver != group.get_i() {
                     return Err(RoutingError::NotForMe.into());
                 }
-                return Ok(());
+                Ok(())
             }
             None => {
                 Ok(())
@@ -179,7 +179,7 @@ impl Coordinator {
     fn handle_incoming_keygen(&mut self, room: &String, message: &String, _: &mut Context<Self>) -> Result<()> {
         let addr = self.keygen_runners.get(room).context("Can't found mpc player.")?;
         let msg = serde_json::from_str::<Msg<KeygenProtocolMessage>>(message).context("deserialize message")?;
-        let _ = addr.do_send(IncomingMessage {
+        addr.do_send(IncomingMessage {
             room: room.clone(),
             message: msg,
         });
@@ -190,7 +190,7 @@ impl Coordinator {
     fn handle_incoming_offline(&mut self, room: &String, message: &String, _: &mut Context<Self>) -> Result<()> {
         let addr = self.offline_state_runners.get(room).context("Not found mpc player.")?;
         let msg = serde_json::from_str::<Msg<OfflineProtocolMessage>>(message).context("deserialize message")?;
-        let _ = addr.do_send(IncomingMessage {
+        addr.do_send(IncomingMessage {
             room: room.clone(),
             message: msg,
         });
@@ -259,12 +259,12 @@ impl Coordinator {
                     Ok(_) => {
                         self.handle_incoming_unsafe(msg.room, transformedMsg.message, current_timestamp(), 0, ctx);
                     }
-                    Err(e) => {
+                    Err(_e) => {
                         log::error!("Failed to decrypt message", {protocolMessage: serde_json::to_string(&msg).unwrap()});
                     }
                 }
             }
-            Err(e) => {
+            Err(_e) => {
                 self.retry(RetryEnvelope {
                     room: msg.room,
                     message: msg.message,
@@ -278,8 +278,8 @@ impl Coordinator {
     }
     //maybe_decrypt(&mut self, msg: &mut IncomingEnvelope)
     fn precheck_message(&mut self, msg: &mut IncomingEnvelope) -> Result<()> {
-        let _ = self.valid_sender_and_receiver(msg.clone())?;
-        let _ = self.maybe_decrypt(msg)?;
+        self.valid_sender_and_receiver(msg.clone())?;
+        self.maybe_decrypt(msg)?;
         Ok(())
     }
 
@@ -294,7 +294,7 @@ impl Coordinator {
             Ok(()) => {
                 self.handle_incoming_unsafe(adapted_envelope.room, adapted_envelope.message, msg.initial_timestamp, msg.attempts, ctx);
             }
-            Err(e) => {
+            Err(_e) => {
                 self.retry(RetryEnvelope {
                     room: msg.room,
                     message: msg.message,
@@ -307,26 +307,24 @@ impl Coordinator {
         }
     }
 
-    fn send_one(envelope: OutgoingEnvelope) -> impl Future<Output=()> {
-        async move {
-            critical_section::<Self, _>(async {
-                let mut sink = with_ctx(|actor: &mut Self, _| actor.sink.take())
-                    .expect("Sink to be present");
-                log::debug!("Sending message", { room: format!("\"{}\"", &envelope.room), protocolMessage: describe_message(&envelope.message)});
-                // Send the request
-                let _ = sink.send(Envelope {
-                    room: envelope.room,
-                    message: envelope.message,
-                }).await;
+    async fn send_one(envelope: OutgoingEnvelope) {
+        critical_section::<Self, _>(async {
+            let mut sink = with_ctx(|actor: &mut Self, _| actor.sink.take())
+                .expect("Sink to be present");
+            log::debug!("Sending message", { room: format!("\"{}\"", &envelope.room), protocolMessage: describe_message(&envelope.message)});
+            // Send the request
+            let _ = sink.send(Envelope {
+                room: envelope.room,
+                message: envelope.message,
+            }).await;
 
-                // Put the sink back, and if the send was successful,
-                // record the in-flight request.
-                with_ctx(|actor: &mut Self, _| {
-                    actor.sink = Some(sink);
-                });
-            })
-                .await;
-        }
+            // Put the sink back, and if the send was successful,
+            // record the in-flight request.
+            with_ctx(|actor: &mut Self, _| {
+                actor.sink = Some(sink);
+            });
+        })
+            .await;
     }
     fn save_group(&mut self, group: PublicKeyGroup) -> Result<()> {
         let value = serde_json::to_vec_pretty(&group).context("serialize local share")?;
@@ -390,11 +388,11 @@ impl Handler<KeygenRequest> for Coordinator {
         });
         let group = PublicKeyGroup::new(public_keys, t, own_public_key);
         let group_id = group.get_group_id();
-        let room = req.request_id.clone() + "@" + group_id.clone().as_str();
+        let room = req.request_id.clone() + "@" + group_id.as_str();
 
         let state = Keygen::new(group.get_i(), group.get_t(), group.get_n()).context("Create state machine")?;
         let player = MpcPlayer::new(
-            req.clone(),
+            req,
             room.clone(),
             group.get_i(),
             state,
@@ -402,7 +400,7 @@ impl Handler<KeygenRequest> for Coordinator {
             ctx.address().recipient(),
             ctx.address().recipient(),
         ).start();
-        let _ = self.save_group(group.clone());
+        let _ = self.save_group(group);
         self.keygen_runners.insert(room, player);
         Ok(())
     }
@@ -435,7 +433,7 @@ impl Handler<SignRequest> for Coordinator {
 
         let s_l: Vec<u16> = if indices.len() != (local_share.share.t + 1) as usize {
             Err(GroupError::WrongNumberOfParticipants)
-        } else if errors.len() != 0 {
+        } else if !errors.is_empty() {
             Err(GroupError::WrongPublicKeys)
         } else {
             Ok(indices.into_iter().map(|o| o.expect("Index") as u16).collect())
@@ -447,9 +445,9 @@ impl Handler<SignRequest> for Coordinator {
             request_type: "SIGN".to_owned(),
             request_status: "PROCESSING".to_owned(),
         });
-        let index_in_group = group.get_i();
+        let _index_in_group = group.get_i();
         let index_in_s_l = subgroup.get_i();
-        let room = req.request_id.clone() + "@" + subgroup.get_group_id().clone().as_str();
+        let room = req.request_id.clone() + "@" + subgroup.get_group_id().as_str();
 
         let req = EnrichedSignRequest {
             inner: req,
@@ -457,14 +455,14 @@ impl Handler<SignRequest> for Coordinator {
             i: index_in_s_l,
             s_l: s_l.clone(),
         };
-        let s = serde_json::to_string(&local_share.share);
+        let _s = serde_json::to_string(&local_share.share);
         // log::debug!("Local share is {:}", s.unwrap());
         let state = OfflineStage::new(index_in_s_l, s_l, local_share.share);
         log::debug!("Party index is {:?}", index_in_s_l);
         // log::debug!("OfflineStage is {:?}", state);
         let state = state.context("Create state machine")?;
         let player = MpcPlayer::new(
-            req.clone(),
+            req,
             room.clone(),
             index_in_s_l,
             state,
@@ -550,13 +548,13 @@ impl Handler<ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>> for Coordinator
         );
 
         let group_id = group.get_group_id();
-        let room = msg.input.request_id.clone() + "@" + group_id.clone().as_str();
+        let room = msg.input.request_id.clone() + "@" + group_id.as_str();
         self.offline_state_runners.remove(&*room);
 
         let sum_pk_bytes = msg.output.public_key().to_bytes(true);
         let sum_pk = hex::encode(sum_pk_bytes.deref());
         log::info!("Public key is {:?}", sum_pk);
-        let share = msg.output.clone();
+        let _share = msg.output.clone();
         let request_id = msg.input.request_id.clone();
         let saved = self.save_local_share(StoredLocalShare {
             public_keys: msg.input.public_keys,
@@ -575,7 +573,7 @@ impl Handler<ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>> for Coordinator
             Ok(()) => {
                 // log::debug!("Saved local share: {:?}", share);
             }
-            Err(e) => {
+            Err(_e) => {
                 //log::error!("Failed to save local share: {}", e);
             }
         }
@@ -645,7 +643,7 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, SignatureRecid>> for Coordinato
         sig.push_str(v.as_str());
 
         // log::info!("Sign request done {:?} sig: {:?}", msg.input, sig);
-        let request_id = msg.input.inner.request_id.clone();
+        let request_id = msg.input.inner.request_id;
         let _ = self.tx_res.send(ResponsePayload {
             request_id,
             result: Some(sig),
