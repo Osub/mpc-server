@@ -21,3 +21,4 @@ pub(crate) type MpcPlayerKG = MpcPlayer<KeygenPayload, Keygen, <Keygen as StateM
 pub(crate) type MpcPlayerO = MpcPlayer<EnrichedSignRequest, OfflineStage, <OfflineStage as StateMachine>::MessageBody, <OfflineStage as StateMachine>::Err, <OfflineStage as StateMachine>::Output>;
 pub(crate) type MsgS = Msg<PartialSignature>;
 pub(crate) type MsgO = Msg<OfflineProtocolMessage>;
+pub(crate) type MsgKG = Msg<KeygenProtocolMessage>;

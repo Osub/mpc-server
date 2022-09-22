@@ -13,9 +13,7 @@ use futures_util::SinkExt;
 use futures_util::TryStreamExt;
 use hex::ToHex;
 use kv_log_macro as log;
-use round_based::{Msg, StateMachine};
 use secp256k1::{PublicKey, SecretKey};
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -24,7 +22,7 @@ use crate::actors::types::{EnrichedSignRequest, SignTask};
 use crate::api::ResponsePayload;
 use crate::core::{CoreMessage, MpcGroup, PublicKeyGroup, StoredLocalShare};
 use crate::{KeygenPayload, prom, SignPayload};
-use crate::actors::aliases::{KeygenError, KeygenProtocolMessage, MpcPlayerKG, MpcPlayerO, MsgO, MsgS, OfflineStageError, ProtocolErrorKG, ProtocolErrorO, ProtocolOutputKG, ProtocolOutputO, ProtocolOutputS, StateMachineKG, StateMachineO};
+use crate::actors::aliases::*;
 use crate::utils;
 use crate::wire::WireMessage;
 
@@ -263,7 +261,7 @@ impl Coordinator {
 
     fn handle_incoming_keygen(&mut self, message: &WireMessage, _: &mut Context<Self>) -> Result<()> {
         let addr = self.keygen_runners.get(&message.room).context("Can't found mpc player.")?;
-        let msg = serde_json::from_str::<Msg<KeygenProtocolMessage>>(&message.payload).context("deserialize message")?;
+        let msg = serde_json::from_str::<MsgKG>(&message.payload).context("deserialize message")?;
         addr.do_send(IncomingMessage {
             room: message.room.to_string(),
             wire_message: message.clone(),
