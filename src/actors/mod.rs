@@ -10,44 +10,17 @@ pub use signer::*;
 pub use player::*;
 pub use coordinator::*;
 use crate::core::Request;
-use messages::{KeygenRequest};
 
 use kv_log_macro as log;
 use crate::actors::messages::CoordinatorMessage;
 use crate::api::{KeygenPayload, SignPayload};
 
 fn handle_keygen(coordinator: &Addr<Coordinator>, payload: KeygenPayload){
-    let KeygenPayload { request_id, public_keys, t } = payload;
-    coordinator.do_send(KeygenRequest {
-        request_id,
-        public_keys,
-        t,
-    });
+    coordinator.do_send(CoordinatorMessage::KeygenRequest(payload));
 }
 
 async fn handle_sign(coordinator: &Addr<Coordinator>, payload: SignPayload) {
-    let SignPayload { request_id, message, public_key, participant_public_keys } = payload;
-    coordinator.do_send(CoordinatorMessage::SignRequest (SignPayload{
-        request_id: request_id.clone(),
-        participant_public_keys,
-        public_key,
-        message,
-    }));
-    // match res {
-    //     Ok(res) => {
-    //         match res {
-    //             Ok(_) => {
-    //                 log::info!("Request sent {:}", request_id);
-    //             }
-    //             Err(e) => {
-    //                 log::error!("Failed send {:}: {:}", request_id, e);
-    //             }
-    //         }
-    //     }
-    //     Err(e) => {
-    //         log::error!("Failed send {:}: {:}", request_id, e);
-    //     }
-    // }
+    coordinator.do_send(CoordinatorMessage::SignRequest (payload));
 }
 
 pub async fn handle(coordinator: &Addr<Coordinator>, request: Request) {

@@ -27,7 +27,7 @@ use crate::actors::msg_utils::describe_message;
 use crate::actors::types::SignTask;
 use crate::api::ResponsePayload;
 use crate::core::{CoreMessage, MpcGroup, PublicKeyGroup};
-use crate::{prom, SignPayload};
+use crate::{KeygenPayload, prom, SignPayload};
 use crate::utils;
 use crate::wire::WireMessage;
 
@@ -74,7 +74,7 @@ pub struct Coordinator {
     pk_str: String,
     tx_res: UnboundedSender<ResponsePayload>,
     db: sled::Db,
-    keygen_runners: HashMap<String, Addr<MpcPlayer<KeygenRequest, Keygen, <Keygen as StateMachine>::MessageBody, <Keygen as StateMachine>::Err, <Keygen as StateMachine>::Output>>>,
+    keygen_runners: HashMap<String, Addr<MpcPlayer<KeygenPayload, Keygen, <Keygen as StateMachine>::MessageBody, <Keygen as StateMachine>::Err, <Keygen as StateMachine>::Output>>>,
     offline_state_runners: HashMap<String, Addr<MpcPlayer<EnrichedSignRequest, OfflineStage, <OfflineStage as StateMachine>::MessageBody, <OfflineStage as StateMachine>::Err, <OfflineStage as StateMachine>::Output>>>,
     signers: HashMap<String, Addr<Signer<EnrichedSignRequest>>>,
     sink: Option<Pin<Box<dyn Sink<CoreMessage, Error=anyhow::Error>>>>,
@@ -105,6 +105,35 @@ impl Coordinator {
                 sink: Some(sink.into()),
             }
         })
+    }
+
+    fn handle_keygen_request(&mut self, req: KeygenPayload, ctx: &mut Context<Self>) -> Result<()> {
+        log::info!("Received request", {request: serde_json::to_string(&req).unwrap()});
+        prom::COUNTER_REQUESTS_KEYGEN_RECEIVED.inc();
+        let KeygenPayload { request_id, public_keys, t } = req.clone();
+        let _ = self.tx_res.send(ResponsePayload {
+            request_id,
+            result: None,
+            request_type: "KEYGEN".to_owned(),
+            request_status: "PROCESSING".to_owned(),
+        });
+        let group = PublicKeyGroup::new(public_keys, t, self.pk_str.clone());
+        let group_id = group.get_group_id();
+        let room = req.request_id.clone() + "@" + group_id.as_str();
+
+        let state = Keygen::new(group.get_i(), group.get_t(), group.get_n()).context("Create state machine")?;
+        let player = MpcPlayer::new(
+            req,
+            room.clone(),
+            group.get_i(),
+            state,
+            ctx.address().recipient(),
+            ctx.address().recipient(),
+            ctx.address().recipient(),
+        ).start();
+        let _ = self.save_group(group);
+        self.keygen_runners.insert(room, player);
+        Ok(())
     }
 
     fn handle_sign_request(&mut self, req: SignPayload, ctx: &mut Context<Self>) -> Result<()> {
@@ -429,39 +458,6 @@ impl Actor for Coordinator {
     type Context = Context<Self>;
 }
 
-impl Handler<KeygenRequest> for Coordinator {
-    type Result = Result<()>;
-
-    fn handle(&mut self, req: KeygenRequest, ctx: &mut Context<Self>) -> Self::Result {
-        log::info!("Received request", {request: serde_json::to_string(&req).unwrap()});
-        prom::COUNTER_REQUESTS_KEYGEN_RECEIVED.inc();
-        let KeygenRequest { request_id, public_keys, t } = req.clone();
-        let _ = self.tx_res.send(ResponsePayload {
-            request_id,
-            result: None,
-            request_type: "KEYGEN".to_owned(),
-            request_status: "PROCESSING".to_owned(),
-        });
-        let group = PublicKeyGroup::new(public_keys, t, self.pk_str.clone());
-        let group_id = group.get_group_id();
-        let room = req.request_id.clone() + "@" + group_id.as_str();
-
-        let state = Keygen::new(group.get_i(), group.get_t(), group.get_n()).context("Create state machine")?;
-        let player = MpcPlayer::new(
-            req,
-            room.clone(),
-            group.get_i(),
-            state,
-            ctx.address().recipient(),
-            ctx.address().recipient(),
-            ctx.address().recipient(),
-        ).start();
-        let _ = self.save_group(group);
-        self.keygen_runners.insert(room, player);
-        Ok(())
-    }
-}
-
 impl Handler<ProtocolError<KeygenError, IncomingMessage<Msg<KeygenProtocolMessage>>>> for Coordinator {
     type Result = ();
 
@@ -494,11 +490,11 @@ impl Handler<ProtocolError<OfflineStageError, IncomingMessage<Msg<OfflineProtoco
     }
 }
 
-impl Handler<ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>> for Coordinator
+impl Handler<ProtocolOutput<KeygenPayload, LocalKey<Secp256k1>>> for Coordinator
 {
     type Result = ();
 
-    fn handle(&mut self, msg: ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>, _: &mut Context<Self>) {
+    fn handle(&mut self, msg: ProtocolOutput<KeygenPayload, LocalKey<Secp256k1>>, _: &mut Context<Self>) {
         prom::COUNTER_REQUESTS_KEYGEN_DONE.inc();
         let group = PublicKeyGroup::new(
             msg.input.public_keys.clone(),
@@ -652,8 +648,12 @@ impl Handler<CoordinatorMessage> for Coordinator
                     }
                 }
             }
+
+            CoordinatorMessage::KeygenRequest(req) => {
+                let _ = self.handle_keygen_request(req, ctx);
+            }
             CoordinatorMessage::SignRequest(req) => {
-                self.handle_sign_request(req, ctx);
+                let _ = self.handle_sign_request(req, ctx);
             }
             _ => {}
         }
