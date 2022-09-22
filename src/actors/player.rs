@@ -11,12 +11,12 @@ use crate::actors::msg_utils::describe_message;
 
 use super::messages::{IncomingMessage, MaybeProceed, OutgoingEnvelope, ProtocolError, ProtocolOutput};
 
-pub struct MpcPlayer<I: Send + Clone + Unpin + 'static, SM, M: Send, E: Send, O: Send> {
+pub struct MpcPlayer<I: Send + Clone + Unpin + 'static, SM, M: Send + Clone, E: Send, O: Send> {
     input: I,
     room: String,
     index: u16,
     msg_count: u16,
-    coordinator: Recipient<ProtocolError<E, Msg<M>>>,
+    coordinator: Recipient<ProtocolError<E, IncomingMessage<Msg<M>>>>,
     message_broker: Recipient<OutgoingEnvelope>,
     state: SM,
     deadline: Option<time::Instant>,
@@ -38,7 +38,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         room: String,
         index: u16,
         state: SM,
-        coordinator: Recipient<ProtocolError<SM::Err, Msg<SM::MessageBody>>>,
+        coordinator: Recipient<ProtocolError<SM::Err, IncomingMessage<Msg<SM::MessageBody>>>>,
         result_collector: Recipient<ProtocolOutput<I, SM::Output>>,
         message_broker: Recipient<OutgoingEnvelope>,
     ) -> Self
@@ -59,7 +59,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
             message_broker,
         }
     }
-    fn send_error(&mut self, error: SM::Err, message: Msg<SM::MessageBody>) {
+    fn send_error(&mut self, error: SM::Err, message: IncomingMessage<Msg<SM::MessageBody>>) {
         debug!("Sending error");
         let _ = self.coordinator.do_send(ProtocolError { room: self.room.clone(), error, message });
     }
@@ -89,8 +89,8 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         SM::MessageBody: Send + Serialize + Clone,
         SM::Output: Send,
 {
-    fn handle_incoming(&mut self, msg: Msg<SM::MessageBody>) {
-        match self.state.handle_incoming(msg.clone()) {
+    fn handle_incoming(&mut self, msg: IncomingMessage<Msg<SM::MessageBody>>) {
+        match self.state.handle_incoming(msg.message.clone()) {
             Ok(()) => {
                 debug!("Handle Ok", { state: format!("\"{:?}\"", self.state) });
             }
@@ -193,9 +193,9 @@ impl<I, SM> Handler<IncomingMessage<Msg<SM::MessageBody>>> for MpcPlayer<I, SM, 
             return;
         }
         self.msg_count += 1;
-        self.handle_incoming(msg.message.clone());
+        self.handle_incoming(msg.clone());
         if let Err(e) = self.maybe_proceed(ctx) {
-            self.send_error(e, msg.message.clone())
+            self.send_error(e, msg.clone())
         }
 
         debug!("Received message", {

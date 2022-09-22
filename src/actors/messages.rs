@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use anyhow::{Result};
 use serde_json::value::RawValue;
+use crate::wire::WireMessage;
 
 #[derive(Message)]
 #[rtype(result = "()")]
@@ -55,6 +56,28 @@ pub struct RetryEnvelope {
 
 #[derive(Message, Serialize, Deserialize, Clone)]
 #[rtype(result = "()")]
+pub struct RetryMessage {
+    pub initial_timestamp: u128,
+    pub attempts: u16,
+    pub check_passed: bool,
+    pub message: WireMessage,
+}
+
+
+
+
+
+
+#[derive(Message, Serialize, Deserialize, Clone)]
+#[rtype(result = "()")]
+pub(crate) enum CoordinatorMessage {
+    Incoming(WireMessage),
+    Retry(RetryMessage),
+}
+
+
+#[derive(Message, Serialize, Deserialize, Clone)]
+#[rtype(result = "()")]
 pub struct IncomingEnvelope {
     pub room: String,
     pub message: String,
@@ -82,10 +105,11 @@ pub struct ProtocolMessageAck {
     pub message_id: String,
 }
 
-#[derive(Message)]
+#[derive(Message, Clone)]
 #[rtype(result = "()")]
 pub struct IncomingMessage<M: Clone> {
     pub room: String,
+    pub wireMessage: WireMessage,
     pub message: M,
 }
 

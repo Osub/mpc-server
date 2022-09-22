@@ -84,11 +84,7 @@ impl Coordinator {
             Si: Sink<CoreMessage, Error=anyhow::Error> + 'static,
     {
         let stream = stream.and_then(|msg| async move {
-            Ok(IncomingEnvelope {
-                room: msg.room,
-                message: msg.payload,
-                sender_public_key: msg.sender_public_key,
-            })
+            Ok(CoordinatorMessage::Incoming(msg))
         });
         let sink: Box<dyn Sink<CoreMessage, Error=anyhow::Error>> = Box::new(sink);
 
@@ -115,11 +111,11 @@ impl Coordinator {
         Ok(split[1])
     }
 
-    fn valid_sender_and_receiver(&mut self, msg: IncomingEnvelope) -> Result<()> {
+    fn valid_sender_and_receiver(&mut self, msg: WireMessage) -> Result<()> {
         let group_id = self.get_group_id(&msg.room).context("extract group_id")?;
         let group = self.retrieve_group(group_id.to_string()).context("Retrieve group.")?;
         group.get_index(&msg.sender_public_key).map_or(Err(GroupError::WrongPublicKey), |_| Ok(())).context("Validate sender.")?;
-        let m = serde_json::from_str::<GenericProtocolMessage>(&msg.message).context("parse GenericProtocolMessage")?;
+        let m = serde_json::from_str::<GenericProtocolMessage>(&msg.payload).context("parse GenericProtocolMessage")?;
         match m.receiver {
             Some(receiver) => {
                 if receiver != group.get_i() {
@@ -156,8 +152,8 @@ impl Coordinator {
         }
     }
 
-    fn maybe_decrypt(&mut self, msg: &mut IncomingEnvelope) -> Result<()> {
-        let mut m = serde_json::from_str::<GenericProtocolMessage>(&msg.message).context("parse GenericProtocolMessage")?;
+    fn maybe_decrypt(&mut self, msg: &mut WireMessage) -> Result<()> {
+        let mut m = serde_json::from_str::<GenericProtocolMessage>(&msg.payload).context("parse GenericProtocolMessage")?;
         match m.receiver {
             Some(_) => {
                 let encrypted_message =
@@ -169,7 +165,7 @@ impl Coordinator {
                 let decrypted = serde_json::value::RawValue::from_string(decrypted).context("convert to RawValue")?;
                 m.body = decrypted;
                 let m = serde_json::to_string(&m).context("convert to string")?;
-                msg.message = m;
+                msg.payload = m;
                 Ok(())
             }
             None => {
@@ -178,54 +174,57 @@ impl Coordinator {
         }
     }
 
-    fn handle_incoming_keygen(&mut self, room: &str, message: &str, _: &mut Context<Self>) -> Result<()> {
-        let addr = self.keygen_runners.get(room).context("Can't found mpc player.")?;
-        let msg = serde_json::from_str::<Msg<KeygenProtocolMessage>>(message).context("deserialize message")?;
+    fn handle_incoming_keygen(&mut self, message: &WireMessage, _: &mut Context<Self>) -> Result<()> {
+        let addr = self.keygen_runners.get(&message.room).context("Can't found mpc player.")?;
+        let msg = serde_json::from_str::<Msg<KeygenProtocolMessage>>(&message.payload).context("deserialize message")?;
         addr.do_send(IncomingMessage {
-            room: room.to_string(),
+            room: message.room.to_string(),
+            wireMessage: message.clone(),
             message: msg,
         });
         prom::COUNTER_MESSAGES_KEYGEN_HANDLED.inc();
         Ok(())
     }
 
-    fn handle_incoming_offline(&mut self, room: &str, message: &str, _: &mut Context<Self>) -> Result<()> {
-        let addr = self.offline_state_runners.get(room).context("Not found mpc player.")?;
-        let msg = serde_json::from_str::<Msg<OfflineProtocolMessage>>(message).context("deserialize message")?;
+    fn handle_incoming_offline(&mut self, message: &WireMessage, _: &mut Context<Self>) -> Result<()> {
+        let addr = self.offline_state_runners.get(&message.room).context("Not found mpc player.")?;
+        let msg = serde_json::from_str::<Msg<OfflineProtocolMessage>>(&message.payload).context("deserialize message")?;
         addr.do_send(IncomingMessage {
-            room: room.to_string(),
+            room: message.room.to_string(),
+            wireMessage: message.clone(),
             message: msg,
         });
         prom::COUNTER_MESSAGES_OFFLINE_HANDLED.inc();
         Ok(())
     }
 
-    fn handle_incoming_sign(&mut self, room: &String, message: &str, _: &mut Context<Self>) -> Result<()> {
-        let addr = self.signers.get(room).context("Not found signer.")?;
-        let msg = serde_json::from_str::<Msg<PartialSignature>>(message).context("deserialize message")?;
+    fn handle_incoming_sign(&mut self, message: &WireMessage, _: &mut Context<Self>) -> Result<()> {
+        let addr = self.signers.get(&message.room).context("Not found signer.")?;
+        let msg = serde_json::from_str::<Msg<PartialSignature>>(&message.payload).context("deserialize message")?;
         addr.do_send(IncomingMessage {
-            room: room.clone(),
+            room: message.room.clone(),
+            wireMessage: message.clone(),
             message: msg,
         });
         prom::COUNTER_MESSAGES_SIGN_HANDLED.inc();
         Ok(())
     }
 
-    fn retry(&mut self, envelope: RetryEnvelope, ctx: &mut Context<Self>) {
+    fn retry(&mut self, envelope: RetryMessage, ctx: &mut Context<Self>) {
         if envelope.attempts > 5 {
             prom::COUNTER_MESSAGES_DROPPED.inc();
-            log::error!("reached max retries", {room: format!("\"{}\"", &envelope.room), protocolMessage: describe_message(&envelope.message)});
+            log::error!("reached max retries", {room: format!("\"{}\"", &envelope.message.room), protocolMessage: describe_message(&envelope.message.payload)});
         } else {
             ctx.run_later(Duration::from_secs(2_u32.pow(envelope.attempts as u32) as u64), move |_, _ctx| {
-                _ctx.notify(envelope);
+                _ctx.notify(CoordinatorMessage::Retry(envelope));
             });
         }
     }
 
-    fn handle_incoming_unsafe(&mut self, room: String, message: String, init_ts: u128, attempts: u16, ctx: &mut Context<Self>) {
-        let h1 = self.handle_incoming_offline(&room, &message, ctx);
-        let h2 = self.handle_incoming_sign(&room, &message, ctx);
-        let h3 = self.handle_incoming_keygen(&room, &message, ctx);
+    fn handle_incoming_unsafe(&mut self, message: WireMessage, init_ts: u128, attempts: u16, ctx: &mut Context<Self>) {
+        let h1 = self.handle_incoming_offline(&message, ctx);
+        let h2 = self.handle_incoming_sign(&message, ctx);
+        let h3 = self.handle_incoming_keygen(&message, ctx);
         let handled_by = match (h1.is_ok(), h2.is_ok(), h3.is_ok()) {
             (true, _, _) => { "offline" }
             (_, true, _) => { "sign" }
@@ -235,31 +234,29 @@ impl Coordinator {
         if attempts == 0 {
             log::debug!("Coordinator routing message", {
                 handled_by: format!("\"{}\"", &handled_by),
-                room: format!("\"{}\"", &room),
-                protocolMessage: describe_message(&message)
+                room: format!("\"{}\"", &message.room),
+                protocolMessage: describe_message(&message.payload)
             });
         }
 
         if h1.or(h2).or(h3).is_err() {
-            self.retry(RetryEnvelope {
-                room,
+            self.retry(RetryMessage {
                 message,
                 initial_timestamp: init_ts,
                 attempts: attempts + 1,
                 check_passed: true,
-                sender_public_key: "".to_string(),
             }, ctx);
         }
     }
 
-    fn handle_incoming(&mut self, msg: IncomingEnvelope, ctx: &mut Context<Self>) {
+    fn handle_incoming(&mut self, msg: WireMessage, ctx: &mut Context<Self>) {
         prom::COUNTER_MESSAGES_TOTAL_RECEIVED.inc();
         match self.valid_sender_and_receiver(msg.clone()) {
             Ok(()) => {
                 let mut transformed = msg.clone();
                 match self.maybe_decrypt(&mut transformed) {
                     Ok(_) => {
-                        self.handle_incoming_unsafe(msg.room, transformed.message, utils::current_timestamp(), 0, ctx);
+                        self.handle_incoming_unsafe(transformed, utils::current_timestamp(), 0, ctx);
                     }
                     Err(_e) => {
                         log::error!("Failed to decrypt message", {protocolMessage: serde_json::to_string(&msg).unwrap()});
@@ -267,43 +264,35 @@ impl Coordinator {
                 }
             }
             Err(_e) => {
-                self.retry(RetryEnvelope {
-                    room: msg.room,
-                    message: msg.message,
+                self.retry(RetryMessage {
+                    message: msg,
                     initial_timestamp: utils::current_timestamp(),
                     attempts: 1,
                     check_passed: false,
-                    sender_public_key: msg.sender_public_key,
                 }, ctx);
             }
         }
     }
     //maybe_decrypt(&mut self, msg: &mut IncomingEnvelope)
-    fn precheck_message(&mut self, msg: &mut IncomingEnvelope) -> Result<()> {
+    fn precheck_message(&mut self, msg: &mut WireMessage) -> Result<()> {
         self.valid_sender_and_receiver(msg.clone())?;
         self.maybe_decrypt(msg)?;
         Ok(())
     }
 
-    fn handle_retry(&mut self, msg: RetryEnvelope, ctx: &mut Context<Self>) {
-        let mut adapted_envelope = IncomingEnvelope {
-            room: msg.room.clone(),
-            message: msg.message.clone(),
-            sender_public_key: msg.sender_public_key.clone(),
-        };
+    fn handle_retry(&mut self, msg: RetryMessage, ctx: &mut Context<Self>) {
+        let mut adapted_envelope = msg.message.clone();
 
         match self.precheck_message(&mut adapted_envelope) {
             Ok(()) => {
-                self.handle_incoming_unsafe(adapted_envelope.room, adapted_envelope.message, msg.initial_timestamp, msg.attempts, ctx);
+                self.handle_incoming_unsafe(adapted_envelope, msg.initial_timestamp, msg.attempts, ctx);
             }
             Err(_e) => {
-                self.retry(RetryEnvelope {
-                    room: msg.room,
+                self.retry(RetryMessage {
                     message: msg.message,
                     initial_timestamp: msg.initial_timestamp,
                     attempts: msg.attempts + 1,
                     check_passed: false,
-                    sender_public_key: msg.sender_public_key,
                 }, ctx);
             }
         }
@@ -476,39 +465,33 @@ impl Handler<SignRequest> for Coordinator {
     }
 }
 
-impl Handler<ProtocolError<KeygenError, Msg<KeygenProtocolMessage>>> for Coordinator {
+impl Handler<ProtocolError<KeygenError, IncomingMessage<Msg<KeygenProtocolMessage>>>> for Coordinator {
     type Result = ();
 
-    fn handle(&mut self, msg: ProtocolError<KeygenError, Msg<KeygenProtocolMessage>>, ctx: &mut Context<Self>) {
+    fn handle(&mut self, msg: ProtocolError<KeygenError, IncomingMessage<Msg<KeygenProtocolMessage>>>, ctx: &mut Context<Self>) {
         log::info!("Error {:?}", msg.error);
         if let KeygenError::ReceivedOutOfOrderMessage { current_round: _, msg_round: _ } = msg.error {
-            let message = serde_json::to_string(&msg.message).unwrap();
-            self.retry(RetryEnvelope {
-                room: msg.room,
-                message,
+            self.retry(RetryMessage {
+                message: msg.message.wireMessage,
                 initial_timestamp: utils::current_timestamp(),
                 attempts: 1,
                 check_passed: true,
-                sender_public_key: "".to_string(),
             }, ctx);
         }
     }
 }
 
-impl Handler<ProtocolError<OfflineStageError, Msg<OfflineProtocolMessage>>> for Coordinator {
+impl Handler<ProtocolError<OfflineStageError, IncomingMessage<Msg<OfflineProtocolMessage>>>> for Coordinator {
     type Result = ();
 
-    fn handle(&mut self, msg: ProtocolError<OfflineStageError, Msg<OfflineProtocolMessage>>, ctx: &mut Context<Self>) {
+    fn handle(&mut self, msg: ProtocolError<OfflineStageError, IncomingMessage<Msg<OfflineProtocolMessage>>>, ctx: &mut Context<Self>) {
         log::info!("Error {:?}", msg.error);
         if let OfflineStageError::ReceivedOutOfOrderMessage { current_round: _, msg_round: _ } = msg.error {
-            let message = serde_json::to_string(&msg.message).unwrap();
-            self.retry(RetryEnvelope {
-                room: msg.room,
-                message,
+            self.retry(RetryMessage {
+                message: msg.message.wireMessage,
                 initial_timestamp: utils::current_timestamp(),
                 attempts: 1,
                 check_passed: true,
-                sender_public_key: "".to_string(),
             }, ctx);
         }
     }
@@ -651,24 +634,34 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, SignatureRecid>> for Coordinato
     }
 }
 
-impl StreamHandler<Result<IncomingEnvelope>> for Coordinator
+impl StreamHandler<Result<CoordinatorMessage>> for Coordinator
 {
-    fn handle(&mut self, msg: Result<IncomingEnvelope>, ctx: &mut Context<Self>) {
+    fn handle(&mut self, msg: Result<CoordinatorMessage>, ctx: &mut Context<Self>) {
         if let Ok(msg) = msg.context("Invalid IncomingEnvlope") {
-            self.handle_incoming(msg, ctx);
+            match msg {
+                CoordinatorMessage::Incoming(msg) => {
+                    self.handle_incoming(msg, ctx);
+                }
+                _ => {}
+            }
         }
     }
 }
 
-impl Handler<RetryEnvelope> for Coordinator
+impl Handler<CoordinatorMessage> for Coordinator
 {
     type Result = ();
 
-    fn handle(&mut self, msg: RetryEnvelope, ctx: &mut Context<Self>) {
-        if msg.check_passed {
-            self.handle_incoming_unsafe(msg.room, msg.message, msg.initial_timestamp, msg.attempts, ctx);
-        } else {
-            self.handle_retry(msg, ctx);
+    fn handle(&mut self, msg: CoordinatorMessage, ctx: &mut Context<Self>) {
+        match msg {
+            CoordinatorMessage::Retry(msg) => {
+                if msg.check_passed {
+                    self.handle_incoming_unsafe(msg.message, msg.initial_timestamp, msg.attempts, ctx);
+                } else {
+                    self.handle_retry(msg, ctx);
+                }
+            }
+            _ => {}
         }
     }
 }
