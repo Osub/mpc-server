@@ -31,7 +31,7 @@ use super::MpcPlayer;
 use super::Signer;
 
 #[derive(Debug, Error)]
-enum GroupError {
+enum CoordinatorError {
     #[error("Public key doesn't belong to the group.")]
     WrongPublicKey,
     #[error("Some of the public keys don't belong to the group.")]
@@ -40,19 +40,10 @@ enum GroupError {
     FailedToParseGroupId,
     #[error("The required number of participants is not met.")]
     WrongNumberOfParticipants,
-}
-
-#[derive(Debug, Error)]
-enum DataError {
     #[error("Couldn't find the local share for {0}.")]
     LocalShareNotFound(String),
     #[error("Couldn't find the group of id {0}.")]
     GroupNotFound(String),
-}
-
-
-#[derive(Debug, Error)]
-enum RoutingError {
     #[error("The message is not for me.")]
     NotForMe,
 }
@@ -146,9 +137,9 @@ impl Coordinator {
         ).partition(Option::is_some);
 
         let s_l: Vec<u16> = if indices.len() != (local_share.share.t + 1) as usize {
-            Err(GroupError::WrongNumberOfParticipants)
+            Err(CoordinatorError::WrongNumberOfParticipants)
         } else if !errors.is_empty() {
-            Err(GroupError::WrongPublicKeys)
+            Err(CoordinatorError::WrongPublicKeys)
         } else {
             Ok(indices.into_iter().map(|o| o.expect("Index") as u16).collect())
         }.context("Find index of participants")?;
@@ -223,7 +214,7 @@ impl Coordinator {
     fn get_group_id<'a>(&mut self, room: &'a str) -> Result<&'a str> {
         let split = room.split('@').collect::<Vec<&str>>();
         if split.len() < 2 {
-            return Err(GroupError::FailedToParseGroupId.into());
+            return Err(CoordinatorError::FailedToParseGroupId.into());
         }
         Ok(split[1])
     }
@@ -231,12 +222,12 @@ impl Coordinator {
     fn valid_sender_and_receiver(&mut self, msg: WireMessage) -> Result<()> {
         let group_id = self.get_group_id(&msg.room).context("extract group_id")?;
         let group = self.retrieve_group(group_id.to_string()).context("Retrieve group.")?;
-        group.get_index(&msg.sender_public_key).map_or(Err(GroupError::WrongPublicKey), |_| Ok(())).context("Validate sender.")?;
+        group.get_index(&msg.sender_public_key).map_or(Err(CoordinatorError::WrongPublicKey), |_| Ok(())).context("Validate sender.")?;
         let m = serde_json::from_str::<GenericProtocolMessage>(&msg.payload).context("parse GenericProtocolMessage")?;
         match m.receiver {
             Some(receiver) => {
                 if receiver != group.get_i() {
-                    return Err(RoutingError::NotForMe.into());
+                    return Err(CoordinatorError::NotForMe.into());
                 }
                 Ok(())
             }
@@ -445,7 +436,7 @@ impl Coordinator {
     }
     fn retrieve_group(&mut self, group_id: String) -> Result<PublicKeyGroup> {
         let group = self.db.get(group_id.as_bytes())?
-            .ok_or_else(|| DataError::GroupNotFound(group_id.clone()))
+            .ok_or_else(|| CoordinatorError::GroupNotFound(group_id.clone()))
             .context("Retrieving group.")?;
         let group = serde_json::from_slice::<PublicKeyGroup>(group.as_ref())
             .context("Decode group.")?;
@@ -466,7 +457,7 @@ impl Coordinator {
     }
     fn retrieve_local_share(&mut self, public_key: String) -> Result<StoredLocalShare> {
         let local_share = self.db.get(public_key.as_bytes())?
-            .ok_or_else(|| DataError::LocalShareNotFound(public_key.clone()))
+            .ok_or_else(|| CoordinatorError::LocalShareNotFound(public_key.clone()))
             .context("Retrieving local share.")?;
         let local_share = serde_json::from_slice::<StoredLocalShare>(local_share.as_ref())
             .context("Decode local share.")?;
