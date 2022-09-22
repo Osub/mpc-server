@@ -1,7 +1,7 @@
 use std::convert::TryInto;
+use std::future::{ready,Ready};
 
 use anyhow::{Context, Result};
-
 use secp256k1::{Message, PublicKey, SecretKey, sign, Signature, verify};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -14,7 +14,27 @@ enum VerifyError {
     Failed,
 }
 
-pub fn parse_signed(msg: String)->Result<SignedEnvelope<String>> {
+pub fn take_non_owned(own_pub_key: String) -> Box<dyn for<'a> FnMut(&'a Result<SignedEnvelope<String>>) -> Ready<bool> + Send> {
+    let f =  move |envelope: &Result<SignedEnvelope<String>>| {
+        let ok = match envelope {
+            Ok(envelope) => {
+                envelope.sender_public_key != own_pub_key
+            }
+            Err(_) => { true }
+        };
+        ready(ok)
+    };
+    Box::new(f)
+}
+
+pub async fn parse_signed(msg: Result<String>) -> Option<Result<SignedEnvelope<String>>> {
+    match msg {
+        Ok(msg) => { Some(do_parse_signed(msg)) }
+        _ => { None }
+    }
+}
+
+fn do_parse_signed(msg: String) -> Result<SignedEnvelope<String>> {
     let signed = serde_json::from_str::<SignedEnvelope<String>>(&msg).context("deserialize message")?;
     let send_pk_str = signed.sender_public_key.clone();
     let bytes = hex::decode(send_pk_str).context("Wrong pub key")?;

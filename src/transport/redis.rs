@@ -5,7 +5,7 @@ use redis::aio::Connection;
 use secp256k1::{PublicKey, SecretKey};
 
 use crate::actors::messages::{Envelope, SignedEnvelope};
-use crate::transport::{parse_signed, sign_envelope};
+use crate::transport::{parse_signed, sign_envelope, take_non_owned};
 
 pub struct RedisClient {
     channel_name: String,
@@ -67,22 +67,8 @@ pub async fn join_computation_via_redis(
         .subscribe()
         .await
         .context("subscribe")?
-        .filter_map(|msg| async move {
-            match msg {
-                Ok(msg) => { Some(parse_signed(msg)) }
-                Err(_) => { None }
-            }
-        })
-        .filter(
-            move |res: &Result<SignedEnvelope<String>>| {
-                futures_util::future::ready(match res {
-                    Ok(envelope) => {
-                        envelope.sender_public_key != own_pub_key
-                    }
-                    Err(_) => { true }
-                })
-            }
-        );
+        .filter_map(parse_signed)
+        .filter(take_non_owned(own_pub_key));
     // Construct channel of outgoing messages
     let outgoing = futures::sink::unfold((client, key, pub_key), |(mut client, key, pub_key), unsigned: Envelope| async move {
         let signed = sign_envelope(key.as_ref(), pub_key.as_ref(), unsigned).context("Failed to sign")?;

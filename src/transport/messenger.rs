@@ -3,11 +3,9 @@ use std::convert::TryInto;
 use anyhow::{Context, Result};
 use futures::{Sink, Stream, StreamExt};
 use secp256k1::{PublicKey, SecretKey};
-use sha2::{Digest};
-
 
 use crate::actors::messages::{Envelope, SignedEnvelope};
-use crate::transport::sign_envelope;
+use crate::transport::{sign_envelope, take_non_owned};
 use crate::transport::parse_signed;
 
 pub async fn join_computation_via_messenger(
@@ -29,22 +27,8 @@ pub async fn join_computation_via_messenger(
         .subscribe()
         .await
         .context("subscribe")?
-        .filter_map(|msg| async move {
-            match msg {
-                Ok(msg) => {Some(parse_signed(msg))}
-                Err(_) => {None}
-            }
-        })
-        .filter(
-            move |res:&Result<SignedEnvelope<String>>| {
-                futures_util::future::ready(match res {
-                    Ok(envelope) => {
-                        envelope.sender_public_key != own_pub_key
-                    }
-                    Err(_) => { true }
-                })
-            }
-        );
+        .filter_map(parse_signed)
+        .filter(take_non_owned(own_pub_key));
     // Construct channel of outgoing messages
     let outgoing = futures::sink::unfold((client, key, pub_key), |(client, key, pub_key), unsigned: Envelope| async move {
         let signed = sign_envelope(key.as_ref(), pub_key.as_ref(), unsigned).context("Failed to sign")?;
