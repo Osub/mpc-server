@@ -34,6 +34,7 @@ mod utils;
 pub mod wire;
 mod api;
 mod storage;
+mod crypto;
 
 #[derive(Debug, Error)]
 enum SetupError {

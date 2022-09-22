@@ -23,8 +23,10 @@ use crate::actors::msg_utils::describe_message;
 use crate::actors::types::{EnrichedSignRequest, SignTask};
 use crate::api::{RequestStatus, ResponsePayload};
 use crate::core::{CoreMessage, MpcGroup, PublicKeyGroup, StoredLocalShare};
+use crate::crypto::{Decrypter, Encrypter, SimpleDecrypter, SimpleEncrypter};
 use crate::storage::{GroupStore, LocalShareStore, SledDbGroupStore, SledDbLocalShareStore};
 use crate::utils;
+use crate::utils::{extract_group_id, make_room_id};
 use crate::wire::WireMessage;
 
 use super::messages::*;
@@ -37,8 +39,6 @@ enum CoordinatorError {
     WrongPublicKey,
     #[error("Some of the public keys don't belong to the group.")]
     WrongPublicKeys,
-    #[error("Cannot parse the group id.")]
-    FailedToParseGroupId,
     #[error("The required number of participants is not met.")]
     WrongNumberOfParticipants,
     #[error("The message is not for me.")]
@@ -46,11 +46,12 @@ enum CoordinatorError {
 }
 
 pub struct Coordinator {
-    sk: Vec<u8>,
     pk_str: String,
     tx_res: UnboundedSender<ResponsePayload>,
     group_store: Box<dyn GroupStore>,
     local_share_store: Box<dyn LocalShareStore>,
+    encrypter: Box<dyn Encrypter>,
+    decrypter: Box<dyn Decrypter>,
     keygen_runners: HashMap<String, Addr<MpcPlayerKG>>,
     offline_state_runners: HashMap<String, Addr<MpcPlayerO>>,
     signers: HashMap<String, Addr<Signer<EnrichedSignRequest>>>,
@@ -69,16 +70,19 @@ impl Coordinator {
         let sink: Box<dyn Sink<CoreMessage, Error=anyhow::Error>> = Box::new(sink);
         let pk = PublicKey::from_secret_key(&sk).serialize_compressed().encode_hex();
         let group_store = Box::new(SledDbGroupStore::new(db.clone()));
-        let local_share_store = Box::new(SledDbLocalShareStore::new(db));
+        let local_share_store = Box::new(SledDbLocalShareStore::new(db.clone()));
+        let encrypter = Box::new(SimpleEncrypter::new(db));
+        let decrypter = Box::new(SimpleDecrypter::new(sk));
 
         Self::create(|ctx| {
             ctx.add_stream(stream);
             Self {
-                sk: sk.serialize().to_vec(),
                 pk_str: pk,
                 tx_res,
                 group_store,
                 local_share_store,
+                encrypter,
+                decrypter,
                 keygen_runners: HashMap::new(),
                 offline_state_runners: HashMap::new(),
                 signers: HashMap::new(),
@@ -99,7 +103,7 @@ impl Coordinator {
         });
         let group = PublicKeyGroup::new(public_keys, t, self.pk_str.clone());
         let group_id = group.get_group_id();
-        let room = req.request_id.clone() + "@" + group_id.as_str();
+        let room = make_room_id(req.request_id.as_str(), group_id.as_str());
 
         let state = StateMachineKG::new(group.get_i(), group.get_t(), group.get_n()).context("Create state machine")?;
         let player = MpcPlayer::new(
@@ -193,7 +197,7 @@ impl Coordinator {
                 }
             }
             CoordinatorMessage::Outgoing(mut msg) => {
-                match self.maybe_encrypt(&mut msg) {
+                match self.encrypter.maybe_encrypt(&mut msg) {
                     Ok(_) => {
                         ctx.spawn(Self::send_one(msg).interop_actor(self));
                     }
@@ -212,16 +216,8 @@ impl Coordinator {
         }
     }
 
-    fn get_group_id<'a>(&mut self, room: &'a str) -> Result<&'a str> {
-        let split = room.split('@').collect::<Vec<&str>>();
-        if split.len() < 2 {
-            return Err(CoordinatorError::FailedToParseGroupId.into());
-        }
-        Ok(split[1])
-    }
-
     fn valid_sender_and_receiver(&mut self, msg: WireMessage) -> Result<()> {
-        let group_id = self.get_group_id(&msg.room).context("extract group_id")?;
+        let group_id = extract_group_id(&msg.room).context("extract group_id")?;
         let group = self.group_store.retrieve_group(group_id.to_string()).context("Retrieve group.")?;
         group.get_index(&msg.sender_public_key).map_or(Err(CoordinatorError::WrongPublicKey), |_| Ok(())).context("Validate sender.")?;
         let m = serde_json::from_str::<GenericProtocolMessage>(&msg.payload).context("parse GenericProtocolMessage")?;
@@ -230,51 +226,6 @@ impl Coordinator {
                 if receiver != group.get_i() {
                     return Err(CoordinatorError::NotForMe.into());
                 }
-                Ok(())
-            }
-            None => {
-                Ok(())
-            }
-        }
-    }
-
-    fn maybe_encrypt(&mut self, msg: &mut CoreMessage) -> Result<()> {
-        let mut m = serde_json::from_str::<GenericProtocolMessage>(&msg.message).context("parse GenericProtocolMessage")?;
-        match m.receiver {
-            Some(receiver) => {
-                let group_id = self.get_group_id(&msg.room).context("extract group_id")?;
-                let group = self.group_store.retrieve_group(group_id.to_string()).context("Retrieve group.")?;
-                let encrypted = group.encrypt(receiver as usize, m.body.to_string().as_str()).context("encrypt")?;
-                let encrypted_message = Encrypted {
-                    encrypted,
-                };
-                let body = serde_json::to_string(&encrypted_message).context("stringify Encrypted")?;
-                let body = serde_json::value::RawValue::from_string(body).context("convert to RawValue")?;
-                m.body = body;
-                let m = serde_json::to_string(&m).context("convert to string")?;
-                msg.message = m;
-                Ok(())
-            }
-            None => {
-                Ok(())
-            }
-        }
-    }
-
-    fn maybe_decrypt(&mut self, msg: &mut WireMessage) -> Result<()> {
-        let mut m = serde_json::from_str::<GenericProtocolMessage>(&msg.payload).context("parse GenericProtocolMessage")?;
-        match m.receiver {
-            Some(_) => {
-                let encrypted_message =
-                    serde_json::from_str::<Encrypted>(m.body.to_string().as_ref()).context("parse encrypted")?;
-
-                let decrypted =
-                    PublicKeyGroup::decrypt(self.sk.as_ref(), encrypted_message.encrypted.as_str()).context("decrypt")?;
-
-                let decrypted = serde_json::value::RawValue::from_string(decrypted).context("convert to RawValue")?;
-                m.body = decrypted;
-                let m = serde_json::to_string(&m).context("convert to string")?;
-                msg.payload = m;
                 Ok(())
             }
             None => {
@@ -363,7 +314,7 @@ impl Coordinator {
         match self.valid_sender_and_receiver(msg.clone()) {
             Ok(()) => {
                 let mut transformed = msg.clone();
-                match self.maybe_decrypt(&mut transformed) {
+                match self.decrypter.maybe_decrypt(&mut transformed) {
                     Ok(_) => {
                         self.handle_incoming_unsafe(transformed, utils::current_timestamp(), 0, ctx);
                     }
@@ -385,7 +336,7 @@ impl Coordinator {
     //maybe_decrypt(&mut self, msg: &mut IncomingEnvelope)
     fn precheck_message(&mut self, msg: &mut WireMessage) -> Result<()> {
         self.valid_sender_and_receiver(msg.clone())?;
-        self.maybe_decrypt(msg)?;
+        self.decrypter.maybe_decrypt(msg)?;
         Ok(())
     }
 
@@ -474,7 +425,7 @@ impl Handler<ProtocolOutputKG> for Coordinator
         );
 
         let group_id = group.get_group_id();
-        let room = msg.input.request_id.clone() + "@" + group_id.as_str();
+        let room = make_room_id(msg.input.request_id.as_str(), group_id.as_str());
         self.offline_state_runners.remove(&*room);
 
         let sum_pk_bytes = msg.output.public_key().to_bytes(true);
