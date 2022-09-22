@@ -179,7 +179,7 @@ impl Coordinator {
         let msg = serde_json::from_str::<Msg<KeygenProtocolMessage>>(&message.payload).context("deserialize message")?;
         addr.do_send(IncomingMessage {
             room: message.room.to_string(),
-            wireMessage: message.clone(),
+            wire_message: message.clone(),
             message: msg,
         });
         prom::COUNTER_MESSAGES_KEYGEN_HANDLED.inc();
@@ -191,7 +191,7 @@ impl Coordinator {
         let msg = serde_json::from_str::<Msg<OfflineProtocolMessage>>(&message.payload).context("deserialize message")?;
         addr.do_send(IncomingMessage {
             room: message.room.to_string(),
-            wireMessage: message.clone(),
+            wire_message: message.clone(),
             message: msg,
         });
         prom::COUNTER_MESSAGES_OFFLINE_HANDLED.inc();
@@ -203,7 +203,7 @@ impl Coordinator {
         let msg = serde_json::from_str::<Msg<PartialSignature>>(&message.payload).context("deserialize message")?;
         addr.do_send(IncomingMessage {
             room: message.room.clone(),
-            wireMessage: message.clone(),
+            wire_message: message.clone(),
             message: msg,
         });
         prom::COUNTER_MESSAGES_SIGN_HANDLED.inc();
@@ -472,7 +472,7 @@ impl Handler<ProtocolError<KeygenError, IncomingMessage<Msg<KeygenProtocolMessag
         log::info!("Error {:?}", msg.error);
         if let KeygenError::ReceivedOutOfOrderMessage { current_round: _, msg_round: _ } = msg.error {
             self.retry(RetryMessage {
-                message: msg.message.wireMessage,
+                message: msg.message.wire_message,
                 initial_timestamp: utils::current_timestamp(),
                 attempts: 1,
                 check_passed: true,
@@ -488,7 +488,7 @@ impl Handler<ProtocolError<OfflineStageError, IncomingMessage<Msg<OfflineProtoco
         log::info!("Error {:?}", msg.error);
         if let OfflineStageError::ReceivedOutOfOrderMessage { current_round: _, msg_round: _ } = msg.error {
             self.retry(RetryMessage {
-                message: msg.message.wireMessage,
+                message: msg.message.wire_message,
                 initial_timestamp: utils::current_timestamp(),
                 attempts: 1,
                 check_passed: true,

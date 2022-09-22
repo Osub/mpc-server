@@ -109,7 +109,7 @@ pub struct ProtocolMessageAck {
 #[rtype(result = "()")]
 pub struct IncomingMessage<M: Clone> {
     pub room: String,
-    pub wireMessage: WireMessage,
+    pub wire_message: WireMessage,
     pub message: M,
 }
 
