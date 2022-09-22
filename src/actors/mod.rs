@@ -4,6 +4,7 @@ mod coordinator;
 pub mod messages;
 mod msg_utils;
 mod types;
+mod aliases;
 
 use actix::Addr;
 pub use signer::*;

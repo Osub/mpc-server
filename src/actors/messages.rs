@@ -11,13 +11,6 @@ use crate::wire::WireMessage;
 #[rtype(result = "()")]
 pub struct MaybeProceed;
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct EnrichedSignRequest {
-    pub inner: SignPayload,
-    pub room: String,
-    pub i: u16,
-    pub s_l: Vec<u16>,
-}
 
 #[derive(Message, Serialize, Deserialize, Clone)]
 #[rtype(result = "()")]

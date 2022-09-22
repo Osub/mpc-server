@@ -8,15 +8,11 @@ use actix_interop::{critical_section, FutureInterop, with_ctx};
 use anyhow::{Context as AnyhowContext, Result};
 use curv::arithmetic::Converter;
 use curv::BigInt;
-use curv::elliptic::curves::Secp256k1;
 use futures::Sink;
 use futures_util::SinkExt;
 use futures_util::TryStreamExt;
 use hex::ToHex;
 use kv_log_macro as log;
-use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::SignatureRecid;
-use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{Error as KeygenError, Keygen, LocalKey, ProtocolMessage as KeygenProtocolMessage};
-use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{CompletedOfflineStage, Error as OfflineStageError, OfflineProtocolMessage, OfflineStage, PartialSignature};
 use round_based::{Msg, StateMachine};
 use secp256k1::{PublicKey, SecretKey};
 use serde::{Deserialize, Serialize};
@@ -24,10 +20,11 @@ use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::actors::msg_utils::describe_message;
-use crate::actors::types::SignTask;
+use crate::actors::types::{EnrichedSignRequest, SignTask};
 use crate::api::ResponsePayload;
-use crate::core::{CoreMessage, MpcGroup, PublicKeyGroup};
+use crate::core::{CoreMessage, MpcGroup, PublicKeyGroup, StoredLocalShare};
 use crate::{KeygenPayload, prom, SignPayload};
+use crate::actors::aliases::{KeygenError, KeygenProtocolMessage, MpcPlayerKG, MpcPlayerO, MsgO, MsgS, OfflineStageError, ProtocolErrorKG, ProtocolErrorO, ProtocolOutputKG, ProtocolOutputO, ProtocolOutputS, StateMachineKG, StateMachineO};
 use crate::utils;
 use crate::wire::WireMessage;
 
@@ -62,20 +59,13 @@ enum RoutingError {
     NotForMe,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct StoredLocalShare {
-    public_keys: Vec<String>,
-    own_public_key: String,
-    share: LocalKey<Secp256k1>,
-}
-
 pub struct Coordinator {
     sk: Vec<u8>,
     pk_str: String,
     tx_res: UnboundedSender<ResponsePayload>,
     db: sled::Db,
-    keygen_runners: HashMap<String, Addr<MpcPlayer<KeygenPayload, Keygen, <Keygen as StateMachine>::MessageBody, <Keygen as StateMachine>::Err, <Keygen as StateMachine>::Output>>>,
-    offline_state_runners: HashMap<String, Addr<MpcPlayer<EnrichedSignRequest, OfflineStage, <OfflineStage as StateMachine>::MessageBody, <OfflineStage as StateMachine>::Err, <OfflineStage as StateMachine>::Output>>>,
+    keygen_runners: HashMap<String, Addr<MpcPlayerKG>>,
+    offline_state_runners: HashMap<String, Addr<MpcPlayerO>>,
     signers: HashMap<String, Addr<Signer<EnrichedSignRequest>>>,
     sink: Option<Pin<Box<dyn Sink<CoreMessage, Error=anyhow::Error>>>>,
 }
@@ -121,7 +111,7 @@ impl Coordinator {
         let group_id = group.get_group_id();
         let room = req.request_id.clone() + "@" + group_id.as_str();
 
-        let state = Keygen::new(group.get_i(), group.get_t(), group.get_n()).context("Create state machine")?;
+        let state = StateMachineKG::new(group.get_i(), group.get_t(), group.get_n()).context("Create state machine")?;
         let player = MpcPlayer::new(
             req,
             room.clone(),
@@ -183,7 +173,7 @@ impl Coordinator {
         };
         let _s = serde_json::to_string(&local_share.share);
         // log::debug!("Local share is {:}", s.unwrap());
-        let state = OfflineStage::new(index_in_s_l, s_l, local_share.share);
+        let state = StateMachineO::new(index_in_s_l, s_l, local_share.share);
         log::debug!("Party index is {:?}", index_in_s_l);
         // log::debug!("OfflineStage is {:?}", state);
         let state = state.context("Create state machine")?;
@@ -285,7 +275,7 @@ impl Coordinator {
 
     fn handle_incoming_offline(&mut self, message: &WireMessage, _: &mut Context<Self>) -> Result<()> {
         let addr = self.offline_state_runners.get(&message.room).context("Not found mpc player.")?;
-        let msg = serde_json::from_str::<Msg<OfflineProtocolMessage>>(&message.payload).context("deserialize message")?;
+        let msg = serde_json::from_str::<MsgO>(&message.payload).context("deserialize message")?;
         addr.do_send(IncomingMessage {
             room: message.room.to_string(),
             wire_message: message.clone(),
@@ -297,7 +287,7 @@ impl Coordinator {
 
     fn handle_incoming_sign(&mut self, message: &WireMessage, _: &mut Context<Self>) -> Result<()> {
         let addr = self.signers.get(&message.room).context("Not found signer.")?;
-        let msg = serde_json::from_str::<Msg<PartialSignature>>(&message.payload).context("deserialize message")?;
+        let msg = serde_json::from_str::<MsgS>(&message.payload).context("deserialize message")?;
         addr.do_send(IncomingMessage {
             room: message.room.clone(),
             wire_message: message.clone(),
@@ -458,10 +448,10 @@ impl Actor for Coordinator {
     type Context = Context<Self>;
 }
 
-impl Handler<ProtocolError<KeygenError, IncomingMessage<Msg<KeygenProtocolMessage>>>> for Coordinator {
+impl Handler<ProtocolErrorKG> for Coordinator {
     type Result = ();
 
-    fn handle(&mut self, msg: ProtocolError<KeygenError, IncomingMessage<Msg<KeygenProtocolMessage>>>, ctx: &mut Context<Self>) {
+    fn handle(&mut self, msg: ProtocolErrorKG, ctx: &mut Context<Self>) {
         log::info!("Error {:?}", msg.error);
         if let KeygenError::ReceivedOutOfOrderMessage { current_round: _, msg_round: _ } = msg.error {
             self.retry(RetryMessage {
@@ -474,10 +464,10 @@ impl Handler<ProtocolError<KeygenError, IncomingMessage<Msg<KeygenProtocolMessag
     }
 }
 
-impl Handler<ProtocolError<OfflineStageError, IncomingMessage<Msg<OfflineProtocolMessage>>>> for Coordinator {
+impl Handler<ProtocolErrorO> for Coordinator {
     type Result = ();
 
-    fn handle(&mut self, msg: ProtocolError<OfflineStageError, IncomingMessage<Msg<OfflineProtocolMessage>>>, ctx: &mut Context<Self>) {
+    fn handle(&mut self, msg: ProtocolErrorO, ctx: &mut Context<Self>) {
         log::info!("Error {:?}", msg.error);
         if let OfflineStageError::ReceivedOutOfOrderMessage { current_round: _, msg_round: _ } = msg.error {
             self.retry(RetryMessage {
@@ -490,11 +480,11 @@ impl Handler<ProtocolError<OfflineStageError, IncomingMessage<Msg<OfflineProtoco
     }
 }
 
-impl Handler<ProtocolOutput<KeygenPayload, LocalKey<Secp256k1>>> for Coordinator
+impl Handler<ProtocolOutputKG> for Coordinator
 {
     type Result = ();
 
-    fn handle(&mut self, msg: ProtocolOutput<KeygenPayload, LocalKey<Secp256k1>>, _: &mut Context<Self>) {
+    fn handle(&mut self, msg: ProtocolOutputKG, _: &mut Context<Self>) {
         prom::COUNTER_REQUESTS_KEYGEN_DONE.inc();
         let group = PublicKeyGroup::new(
             msg.input.public_keys.clone(),
@@ -535,11 +525,11 @@ impl Handler<ProtocolOutput<KeygenPayload, LocalKey<Secp256k1>>> for Coordinator
     }
 }
 
-impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coordinator
+impl Handler<ProtocolOutputO> for Coordinator
 {
     type Result = ();
 
-    fn handle(&mut self, msg: ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>, ctx: &mut Context<Self>) {
+    fn handle(&mut self, msg: ProtocolOutputO, ctx: &mut Context<Self>) {
         prom::COUNTER_REQUESTS_SIGN_DONE.inc();
         log::info!("output public key", { room: format!("{:?}", &msg.input.room), publicKey: format!("\"{}\"", hex::encode(msg.output.public_key().to_bytes(true).as_ref()))} );
 
@@ -586,11 +576,11 @@ impl Handler<ProtocolOutput<EnrichedSignRequest, CompletedOfflineStage>> for Coo
     }
 }
 
-impl Handler<ProtocolOutput<EnrichedSignRequest, SignatureRecid>> for Coordinator
+impl Handler<ProtocolOutputS> for Coordinator
 {
     type Result = ();
 
-    fn handle(&mut self, msg: ProtocolOutput<EnrichedSignRequest, SignatureRecid>, _: &mut Context<Self>) {
+    fn handle(&mut self, msg: ProtocolOutputS, _: &mut Context<Self>) {
         let r = hex::encode(msg.output.r.to_bytes().as_ref());
         let s = hex::encode(msg.output.s.to_bytes().as_ref());
         let v = hex::encode(msg.output.recid.to_be_bytes().as_ref());
