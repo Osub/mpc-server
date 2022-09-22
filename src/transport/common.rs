@@ -6,7 +6,7 @@ use secp256k1::{Message, PublicKey, SecretKey, sign, Signature, verify};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::actors::messages::SignedEnvelope;
+use crate::wire::WireMessage;
 use crate::core::CoreMessage;
 
 #[derive(Debug, Error)]
@@ -15,8 +15,8 @@ enum VerifyError {
     Failed,
 }
 
-pub fn take_non_owned(own_pub_key: String) -> Box<dyn for<'a> FnMut(&'a Result<SignedEnvelope<String>>) -> Ready<bool> + Send> {
-    let f =  move |envelope: &Result<SignedEnvelope<String>>| {
+pub fn take_non_owned(own_pub_key: String) -> Box<dyn for<'a> FnMut(&'a Result<WireMessage>) -> Ready<bool> + Send> {
+    let f =  move |envelope: &Result<WireMessage>| {
         let ok = match envelope {
             Ok(envelope) => {
                 envelope.sender_public_key != own_pub_key
@@ -28,15 +28,15 @@ pub fn take_non_owned(own_pub_key: String) -> Box<dyn for<'a> FnMut(&'a Result<S
     Box::new(f)
 }
 
-pub async fn parse_signed(msg: Result<String>) -> Option<Result<SignedEnvelope<String>>> {
+pub async fn parse_signed(msg: Result<String>) -> Option<Result<WireMessage>> {
     match msg {
         Ok(msg) => { Some(do_parse_signed(msg)) }
         _ => { None }
     }
 }
 
-fn do_parse_signed(msg: String) -> Result<SignedEnvelope<String>> {
-    let signed = serde_json::from_str::<SignedEnvelope<String>>(&msg).context("deserialize message")?;
+fn do_parse_signed(msg: String) -> Result<WireMessage> {
+    let signed = serde_json::from_str::<WireMessage>(&msg).context("deserialize message")?;
     let send_pk_str = signed.sender_public_key.clone();
     let bytes = hex::decode(send_pk_str).context("Wrong pub key")?;
 
@@ -58,7 +58,7 @@ fn do_parse_signed(msg: String) -> Result<SignedEnvelope<String>> {
     Ok(out)
 }
 
-pub fn sign_envelope(key: &SecretKey, pub_key: &str, envelope: CoreMessage) -> Result<SignedEnvelope<String>> {
+pub fn sign_envelope(key: &SecretKey, pub_key: &str, envelope: CoreMessage) -> Result<WireMessage> {
     let mut hasher = Sha256::new();
     hasher.update(envelope.message.as_bytes());
     let hash = hasher.finalize();
@@ -66,7 +66,7 @@ pub fn sign_envelope(key: &SecretKey, pub_key: &str, envelope: CoreMessage) -> R
     let message = Message::parse(hbytes);
     let (sig, _recid) = sign(&message, key);
     let signature = hex::encode(sig.serialize());
-    let signed = SignedEnvelope {
+    let signed = WireMessage {
         room: envelope.room,
         message: envelope.message,
         sender_public_key: pub_key.to_string(),

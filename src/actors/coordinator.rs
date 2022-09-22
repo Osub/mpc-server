@@ -79,14 +79,14 @@ pub struct Coordinator {
 impl Coordinator {
     pub fn new<Si, St>(sk: SecretKey, tx_res: UnboundedSender<ResponsePayload>, db: sled::Db, stream: St, sink: Si) -> Addr<Self>
         where
-            St: Stream<Item=Result<SignedEnvelope<String>>> + 'static,
+            St: Stream<Item=Result<SignedEnvelope>> + 'static,
             Si: Sink<CoreMessage, Error=anyhow::Error> + 'static,
     {
         let stream = stream.and_then(|msg| async move {
             Ok(IncomingEnvelope {
-                room: msg.room,
-                message: msg.message,
-                sender_public_key: msg.sender_public_key,
+                room: msg.0.room,
+                message: msg.0.message,
+                sender_public_key: msg.0.sender_public_key,
             })
         });
         let sink: Box<dyn Sink<CoreMessage, Error=anyhow::Error>> = Box::new(sink);

@@ -4,9 +4,9 @@ use redis::{AsyncCommands, Client, Msg};
 use redis::aio::Connection;
 use secp256k1::{PublicKey, SecretKey};
 
-use crate::actors::messages::SignedEnvelope;
 use crate::core::CoreMessage;
 use crate::transport::{parse_signed, sign_envelope, take_non_owned};
+use crate::wire::WireMessage;
 
 pub struct RedisClient {
     channel_name: String,
@@ -53,7 +53,7 @@ pub async fn join_computation_via_redis(
     redis_connection_string: String,
     key: SecretKey,
 ) -> Result<(
-    impl Stream<Item=Result<SignedEnvelope<String>>>,
+    impl Stream<Item=Result<WireMessage>>,
     impl Sink<CoreMessage, Error=anyhow::Error>,
 )>
 {

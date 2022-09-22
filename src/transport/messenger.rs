@@ -4,16 +4,16 @@ use anyhow::{Context, Result};
 use futures::{Sink, Stream, StreamExt};
 use secp256k1::{PublicKey, SecretKey};
 
-use crate::actors::messages::SignedEnvelope;
 use crate::core::CoreMessage;
 use crate::transport::{sign_envelope, take_non_owned};
 use crate::transport::parse_signed;
+use crate::wire::WireMessage;
 
 pub async fn join_computation_via_messenger(
     url: surf::Url,
     key: SecretKey,
 ) -> Result<(
-    impl Stream<Item=Result<SignedEnvelope<String>>>,
+    impl Stream<Item=Result<WireMessage>>,
     impl Sink<CoreMessage, Error=anyhow::Error>,
 )>
 {
