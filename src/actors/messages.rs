@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use anyhow::{Result};
 use serde_json::value::RawValue;
-use crate::wire::WireMessage;
 
 #[derive(Message)]
 #[rtype(result = "()")]
@@ -42,10 +41,6 @@ pub struct EcdsaSignature {
     pub r: String,
     pub s: String,
 }
-
-#[derive(Message, Serialize, Deserialize, Clone)]
-#[rtype(result = "()")]
-pub struct SignedEnvelope(pub WireMessage);
 
 #[derive(Message, Serialize, Deserialize, Clone)]
 #[rtype(result = "()")]

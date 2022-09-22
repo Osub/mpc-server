@@ -27,6 +27,7 @@ use crate::actors::types::SignTask;
 use crate::core::{CoreMessage, MpcGroup, PublicKeyGroup, ResponsePayload};
 use crate::prom;
 use crate::utils;
+use crate::wire::WireMessage;
 
 use super::messages::*;
 use super::MpcPlayer;
@@ -79,14 +80,14 @@ pub struct Coordinator {
 impl Coordinator {
     pub fn new<Si, St>(sk: SecretKey, tx_res: UnboundedSender<ResponsePayload>, db: sled::Db, stream: St, sink: Si) -> Addr<Self>
         where
-            St: Stream<Item=Result<SignedEnvelope>> + 'static,
+            St: Stream<Item=Result<WireMessage>> + 'static,
             Si: Sink<CoreMessage, Error=anyhow::Error> + 'static,
     {
         let stream = stream.and_then(|msg| async move {
             Ok(IncomingEnvelope {
-                room: msg.0.room,
-                message: msg.0.payload,
-                sender_public_key: msg.0.sender_public_key,
+                room: msg.room,
+                message: msg.payload,
+                sender_public_key: msg.sender_public_key,
             })
         });
         let sink: Box<dyn Sink<CoreMessage, Error=anyhow::Error>> = Box::new(sink);

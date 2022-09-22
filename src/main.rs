@@ -4,8 +4,6 @@ extern crate json_env_logger;
 
 use std::path::PathBuf;
 
-
-use futures::StreamExt;
 use ::redis::Client;
 use actix::prelude::*;
 use actix_web::{App, HttpResponse, HttpServer, middleware, Responder, web};
@@ -22,7 +20,6 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use cli::Cli;
 
 use crate::actors::{Coordinator, handle};
-use crate::actors::messages::SignedEnvelope;
 use crate::core::{KeygenPayload, Payload, ResponsePayload, SignPayload};
 use crate::key::decrypt;
 use crate::transport::{join_computation_via_messenger, join_computation_via_redis};
@@ -210,7 +207,6 @@ async fn use_messenger(args: Cli, mut rx: UnboundedReceiver<Payload>, tx_res: Un
     let local_share_db: sled::Db = sled::open(local_shares_path).unwrap();
 
     if let Ok((incoming, outgoing)) = join_computation_via_messenger(args.messenger_address.unwrap(), sk.clone()).await {
-        let incoming = incoming.map(|m|{m.map(SignedEnvelope)});
         let coordinator = Coordinator::new(sk, tx_res, local_share_db, incoming, outgoing);
         while let Some(payload) = rx.recv().await {
             handle(&coordinator, own_public_key.clone(), payload).await;
@@ -226,7 +222,6 @@ async fn use_redis(args: Cli, mut rx: UnboundedReceiver<Payload>, tx_res: Unboun
     let local_share_db: sled::Db = sled::open(local_shares_path).unwrap();
 
     if let Ok((incoming, outgoing)) = join_computation_via_redis(args.redis_url.unwrap(), sk.clone()).await {
-        let incoming = incoming.map(|m|{m.map(SignedEnvelope)});
         let coordinator = Coordinator::new(sk, tx_res, local_share_db, incoming, outgoing);
         while let Some(payload) = rx.recv().await {
             handle(&coordinator, own_public_key.clone(), payload).await;
