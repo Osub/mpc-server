@@ -17,9 +17,24 @@ pub struct KeygenPayload {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum RequestType {
+    KEYGEN,
+    SIGN,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum RequestStatus {
+    RECEIVED,
+    PROCESSING,
+    OFFLINE_STAGE_DONE,
+    DONE,
+    ERROR
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ResponsePayload {
     pub request_id: String,
     pub result: Option<String>,
-    pub request_type: String,
-    pub request_status: String,
+    pub request_type: RequestType,
+    pub request_status: RequestStatus,
 }

@@ -17,12 +17,12 @@ use secp256k1::{PublicKey, SecretKey};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::{KeygenPayload, prom, RequestType, SignPayload};
+use crate::actors::aliases::*;
 use crate::actors::msg_utils::describe_message;
 use crate::actors::types::{EnrichedSignRequest, SignTask};
-use crate::api::ResponsePayload;
+use crate::api::{RequestStatus, ResponsePayload};
 use crate::core::{CoreMessage, MpcGroup, PublicKeyGroup, StoredLocalShare};
-use crate::{KeygenPayload, prom, SignPayload};
-use crate::actors::aliases::*;
 use crate::utils;
 use crate::wire::WireMessage;
 
@@ -102,8 +102,8 @@ impl Coordinator {
         let _ = self.tx_res.send(ResponsePayload {
             request_id,
             result: None,
-            request_type: "KEYGEN".to_owned(),
-            request_status: "PROCESSING".to_owned(),
+            request_type: RequestType::KEYGEN,
+            request_status: RequestStatus::PROCESSING,
         });
         let group = PublicKeyGroup::new(public_keys, t, self.pk_str.clone());
         let group_id = group.get_group_id();
@@ -156,8 +156,8 @@ impl Coordinator {
         let _ = self.tx_res.send(ResponsePayload {
             request_id: req.request_id.clone(),
             result: None,
-            request_type: "SIGN".to_owned(),
-            request_status: "PROCESSING".to_owned(),
+            request_type: RequestType::SIGN,
+            request_status: RequestStatus::PROCESSING,
         });
         let _index_in_group = group.get_i();
         let index_in_s_l = subgroup.get_i();
@@ -200,7 +200,7 @@ impl Coordinator {
                     self.handle_retry(msg, ctx);
                 }
             }
-            CoordinatorMessage::Outgoing(mut msg) =>{
+            CoordinatorMessage::Outgoing(mut msg) => {
                 match self.maybe_encrypt(&mut msg) {
                     Ok(_) => {
                         ctx.spawn(Self::send_one(msg).interop_actor(self));
@@ -540,8 +540,8 @@ impl Handler<ProtocolOutputKG> for Coordinator
         let _ = self.tx_res.send(ResponsePayload {
             request_id,
             result: Some(sum_pk),
-            request_type: "KEYGEN".to_owned(),
-            request_status: "DONE".to_owned(),
+            request_type: RequestType::KEYGEN,
+            request_status: RequestStatus::DONE,
         });
 
         match saved {
@@ -586,8 +586,8 @@ impl Handler<ProtocolOutputO> for Coordinator
             let _ = self.tx_res.send(ResponsePayload {
                 request_id,
                 result: None,
-                request_type: "SIGN".to_owned(),
-                request_status: "OFFLINE_STAGE_DONE".to_owned(),
+                request_type: RequestType::SIGN,
+                request_status: RequestStatus::OFFLINE_STAGE_DONE,
             });
 
             Ok(())
@@ -598,8 +598,8 @@ impl Handler<ProtocolOutputO> for Coordinator
                 let _ = self.tx_res.send(ResponsePayload {
                     request_id: msg.input.inner.request_id.clone(),
                     result: None,
-                    request_type: "SIGN".to_owned(),
-                    request_status: "ERROR".to_owned(),
+                    request_type: RequestType::SIGN,
+                    request_status: RequestStatus::ERROR,
                 });
             }
         }
@@ -625,8 +625,8 @@ impl Handler<ProtocolOutputS> for Coordinator
         let _ = self.tx_res.send(ResponsePayload {
             request_id,
             result: Some(sig),
-            request_type: "SIGN".to_owned(),
-            request_status: "DONE".to_owned(),
+            request_type: RequestType::SIGN,
+            request_status: RequestStatus::DONE,
         });
     }
 }

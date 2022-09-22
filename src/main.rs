@@ -19,7 +19,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use cli::Cli;
 
 use crate::actors::{Coordinator, handle};
-use crate::api::{KeygenPayload, ResponsePayload, SignPayload};
+use crate::api::{KeygenPayload, RequestStatus, RequestType, ResponsePayload, SignPayload};
 use crate::core::Request;
 use crate::key::decrypt;
 use crate::transport::{join_computation_via_messenger, join_computation_via_redis};
@@ -90,8 +90,8 @@ async fn keygen(data: web::Data<AppState>, req: web::Json<KeygenPayload>) -> imp
     let _ = data.tx_res.send(ResponsePayload {
         request_id: req.0.request_id.clone(),
         result: None,
-        request_type: "KEYGEN".to_owned(),
-        request_status: "RECEIVED".to_owned(),
+        request_type: RequestType::KEYGEN,
+        request_status: RequestStatus::RECEIVED,
     });
     match data.tx.send(Request::Keygen(req.0)) {
         Ok(_) => {
@@ -113,8 +113,8 @@ async fn sign(data: web::Data<AppState>, req: web::Json<SignPayload>) -> impl Re
             let _ = data.tx_res.send(ResponsePayload {
                 request_id: req.0.request_id.clone(),
                 result: None,
-                request_type: "SIGN".to_owned(),
-                request_status: "RECEIVED".to_owned(),
+                request_type: RequestType::SIGN,
+                request_status: RequestStatus::RECEIVED,
             });
             match data.tx.send(Request::Sign(req.0)) {
                 Ok(_) => {
