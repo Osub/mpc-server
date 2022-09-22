@@ -188,6 +188,38 @@ impl Coordinator {
         Ok(())
     }
 
+    fn handle_coordinator_message(&mut self, msg: CoordinatorMessage, ctx: &mut Context<Self>) {
+        match msg {
+            CoordinatorMessage::Incoming(msg) => {
+                self.handle_incoming(msg, ctx);
+            }
+            CoordinatorMessage::Retry(msg) => {
+                if msg.check_passed {
+                    self.handle_incoming_unsafe(msg.message, msg.initial_timestamp, msg.attempts, ctx);
+                } else {
+                    self.handle_retry(msg, ctx);
+                }
+            }
+            CoordinatorMessage::Outgoing(mut msg) =>{
+                match self.maybe_encrypt(&mut msg) {
+                    Ok(_) => {
+                        ctx.spawn(Self::send_one(msg).interop_actor(self));
+                    }
+                    Err(e) => {
+                        log::error!("Failed encrypt message: {}", e);
+                    }
+                }
+            }
+
+            CoordinatorMessage::KeygenRequest(req) => {
+                let _ = self.handle_keygen_request(req, ctx);
+            }
+            CoordinatorMessage::SignRequest(req) => {
+                let _ = self.handle_sign_request(req, ctx);
+            }
+        }
+    }
+
     fn get_group_id<'a>(&mut self, room: &'a str) -> Result<&'a str> {
         let split = room.split('@').collect::<Vec<&str>>();
         if split.len() < 2 {
@@ -603,12 +635,7 @@ impl StreamHandler<Result<CoordinatorMessage>> for Coordinator
 {
     fn handle(&mut self, msg: Result<CoordinatorMessage>, ctx: &mut Context<Self>) {
         if let Ok(msg) = msg.context("Invalid IncomingEnvlope") {
-            match msg {
-                CoordinatorMessage::Incoming(msg) => {
-                    self.handle_incoming(msg, ctx);
-                }
-                _ => {}
-            }
+            self.handle_coordinator_message(msg, ctx);
         }
     }
 }
@@ -618,32 +645,6 @@ impl Handler<CoordinatorMessage> for Coordinator
     type Result = ();
 
     fn handle(&mut self, msg: CoordinatorMessage, ctx: &mut Context<Self>) {
-        match msg {
-            CoordinatorMessage::Retry(msg) => {
-                if msg.check_passed {
-                    self.handle_incoming_unsafe(msg.message, msg.initial_timestamp, msg.attempts, ctx);
-                } else {
-                    self.handle_retry(msg, ctx);
-                }
-            }
-            CoordinatorMessage::Outgoing(mut msg) =>{
-                match self.maybe_encrypt(&mut msg) {
-                    Ok(_) => {
-                        ctx.spawn(Self::send_one(msg).interop_actor(self));
-                    }
-                    Err(e) => {
-                        log::error!("Failed encrypt message: {}", e);
-                    }
-                }
-            }
-
-            CoordinatorMessage::KeygenRequest(req) => {
-                let _ = self.handle_keygen_request(req, ctx);
-            }
-            CoordinatorMessage::SignRequest(req) => {
-                let _ = self.handle_sign_request(req, ctx);
-            }
-            _ => {}
-        }
+        self.handle_coordinator_message(msg, ctx);
     }
 }
