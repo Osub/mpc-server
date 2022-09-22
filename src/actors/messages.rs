@@ -45,17 +45,6 @@ pub struct EcdsaSignature {
 
 #[derive(Message, Serialize, Deserialize, Clone)]
 #[rtype(result = "()")]
-pub struct RetryEnvelope {
-    pub room: String,
-    pub message: String,
-    pub initial_timestamp: u128,
-    pub attempts: u16,
-    pub check_passed: bool,
-    pub sender_public_key: String,
-}
-
-#[derive(Message, Serialize, Deserialize, Clone)]
-#[rtype(result = "()")]
 pub struct RetryMessage {
     pub initial_timestamp: u128,
     pub attempts: u16,
@@ -73,15 +62,6 @@ pub struct RetryMessage {
 pub(crate) enum CoordinatorMessage {
     Incoming(WireMessage),
     Retry(RetryMessage),
-}
-
-
-#[derive(Message, Serialize, Deserialize, Clone)]
-#[rtype(result = "()")]
-pub struct IncomingEnvelope {
-    pub room: String,
-    pub message: String,
-    pub sender_public_key: String,
 }
 
 #[derive(Message, Serialize, Deserialize, Clone)]
