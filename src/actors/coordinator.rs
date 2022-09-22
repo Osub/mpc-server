@@ -12,12 +12,13 @@ use curv::elliptic::curves::Secp256k1;
 use futures::Sink;
 use futures_util::SinkExt;
 use futures_util::TryStreamExt;
+use hex::ToHex;
 use kv_log_macro as log;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::SignatureRecid;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{Error as KeygenError, Keygen, LocalKey, ProtocolMessage as KeygenProtocolMessage};
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{CompletedOfflineStage, Error as OfflineStageError, OfflineProtocolMessage, OfflineStage, PartialSignature};
 use round_based::{Msg, StateMachine};
-use secp256k1::SecretKey;
+use secp256k1::{PublicKey, SecretKey};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
@@ -70,6 +71,7 @@ struct StoredLocalShare {
 
 pub struct Coordinator {
     sk: Vec<u8>,
+    pk_str: String,
     tx_res: UnboundedSender<ResponsePayload>,
     db: sled::Db,
     keygen_runners: HashMap<String, Addr<MpcPlayer<KeygenRequest, Keygen, <Keygen as StateMachine>::MessageBody, <Keygen as StateMachine>::Err, <Keygen as StateMachine>::Output>>>,
@@ -88,11 +90,13 @@ impl Coordinator {
             Ok(CoordinatorMessage::Incoming(msg))
         });
         let sink: Box<dyn Sink<CoreMessage, Error=anyhow::Error>> = Box::new(sink);
+        let pk = PublicKey::from_secret_key(&sk).serialize_compressed().encode_hex();
 
         Self::create(|ctx| {
             ctx.add_stream(stream);
             Self {
                 sk: sk.serialize().to_vec(),
+                pk_str: pk,
                 tx_res,
                 db,
                 keygen_runners: HashMap::new(),
@@ -368,14 +372,14 @@ impl Handler<KeygenRequest> for Coordinator {
     fn handle(&mut self, req: KeygenRequest, ctx: &mut Context<Self>) -> Self::Result {
         log::info!("Received request", {request: serde_json::to_string(&req).unwrap()});
         prom::COUNTER_REQUESTS_KEYGEN_RECEIVED.inc();
-        let KeygenRequest { request_id, public_keys, t, own_public_key } = req.clone();
+        let KeygenRequest { request_id, public_keys, t } = req.clone();
         let _ = self.tx_res.send(ResponsePayload {
             request_id,
             result: None,
             request_type: "KEYGEN".to_owned(),
             request_status: "PROCESSING".to_owned(),
         });
-        let group = PublicKeyGroup::new(public_keys, t, own_public_key);
+        let group = PublicKeyGroup::new(public_keys, t, self.pk_str.clone());
         let group_id = group.get_group_id();
         let room = req.request_id.clone() + "@" + group_id.as_str();
 
@@ -405,14 +409,14 @@ impl Handler<SignRequest> for Coordinator {
         let group = PublicKeyGroup::new(
             local_share.public_keys,
             local_share.share.t,
-            req.own_public_key.clone(),
+            self.pk_str.clone(),
         );
         // let public_keys = local_share.public_keys;
         // public_keys.iter().position(|&r| *r == k)
         let subgroup = PublicKeyGroup::new(
             req.participant_public_keys.clone(),
             local_share.share.t,
-            req.own_public_key.clone(),
+            self.pk_str.clone(),
         );
         let _ = self.save_group(subgroup.clone());
         let (indices, errors): (Vec<Option<usize>>, Vec<_>) = req.participant_public_keys.clone().into_iter().map(
@@ -504,7 +508,7 @@ impl Handler<ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>> for Coordinator
         let group = PublicKeyGroup::new(
             msg.input.public_keys.clone(),
             msg.input.t,
-            msg.input.own_public_key.clone(),
+            self.pk_str.clone(),
         );
 
         let group_id = group.get_group_id();
@@ -518,7 +522,7 @@ impl Handler<ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>> for Coordinator
         let request_id = msg.input.request_id.clone();
         let saved = self.save_local_share(StoredLocalShare {
             public_keys: msg.input.public_keys,
-            own_public_key: msg.input.own_public_key,
+            own_public_key: self.pk_str.clone(),
             share: msg.output,
         });
 

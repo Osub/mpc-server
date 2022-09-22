@@ -202,30 +202,28 @@ async fn bootstrap(args: Cli, rx: UnboundedReceiver<Request>, tx_res: UnboundedS
 }
 
 async fn use_messenger(args: Cli, mut rx: UnboundedReceiver<Request>, tx_res: UnboundedSender<ResponsePayload>) {
-    let (sk, pk) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't get secret key.").unwrap();
-    let own_public_key = hex::encode(pk.serialize_compressed());
+    let (sk, _) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't get secret key.").unwrap();
     let local_shares_path = args.db_path.join("local_shares");
     let local_share_db: sled::Db = sled::open(local_shares_path).unwrap();
 
     if let Ok((incoming, outgoing)) = join_computation_via_messenger(args.messenger_address.unwrap(), sk.clone()).await {
         let coordinator = Coordinator::new(sk, tx_res, local_share_db, incoming, outgoing);
         while let Some(payload) = rx.recv().await {
-            handle(&coordinator, own_public_key.clone(), payload).await;
+            handle(&coordinator, payload).await;
         }
     };
 }
 
 
 async fn use_redis(args: Cli, mut rx: UnboundedReceiver<Request>, tx_res: UnboundedSender<ResponsePayload>) {
-    let (sk, pk) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't get secret key.").unwrap();
-    let own_public_key = hex::encode(pk.serialize_compressed());
+    let (sk, _) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't get secret key.").unwrap();
     let local_shares_path = args.db_path.join("local_shares");
     let local_share_db: sled::Db = sled::open(local_shares_path).unwrap();
 
     if let Ok((incoming, outgoing)) = join_computation_via_redis(args.redis_url.unwrap(), sk.clone()).await {
         let coordinator = Coordinator::new(sk, tx_res, local_share_db, incoming, outgoing);
         while let Some(payload) = rx.recv().await {
-            handle(&coordinator, own_public_key.clone(), payload).await;
+            handle(&coordinator,  payload).await;
         }
     };
 }

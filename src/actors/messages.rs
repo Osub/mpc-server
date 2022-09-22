@@ -16,7 +16,6 @@ pub struct KeygenRequest {
     pub request_id: String,
     pub public_keys: Vec<String>,
     pub t: u16,
-    pub own_public_key: String,
 }
 
 #[derive(Message, Serialize, Deserialize, Clone, Debug)]
@@ -26,7 +25,6 @@ pub struct SignRequest {
     pub public_key: String,
     pub participant_public_keys: Vec<String>,
     pub message: String,
-    pub own_public_key: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
