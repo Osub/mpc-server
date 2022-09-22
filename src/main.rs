@@ -33,6 +33,7 @@ mod prom;
 mod utils;
 pub mod wire;
 mod api;
+mod storage;
 
 #[derive(Debug, Error)]
 enum SetupError {

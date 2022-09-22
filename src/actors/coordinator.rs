@@ -23,6 +23,7 @@ use crate::actors::msg_utils::describe_message;
 use crate::actors::types::{EnrichedSignRequest, SignTask};
 use crate::api::{RequestStatus, ResponsePayload};
 use crate::core::{CoreMessage, MpcGroup, PublicKeyGroup, StoredLocalShare};
+use crate::storage::{GroupStore, LocalShareStore, SledDbGroupStore, SledDbLocalShareStore};
 use crate::utils;
 use crate::wire::WireMessage;
 
@@ -40,10 +41,6 @@ enum CoordinatorError {
     FailedToParseGroupId,
     #[error("The required number of participants is not met.")]
     WrongNumberOfParticipants,
-    #[error("Couldn't find the local share for {0}.")]
-    LocalShareNotFound(String),
-    #[error("Couldn't find the group of id {0}.")]
-    GroupNotFound(String),
     #[error("The message is not for me.")]
     NotForMe,
 }
@@ -52,7 +49,8 @@ pub struct Coordinator {
     sk: Vec<u8>,
     pk_str: String,
     tx_res: UnboundedSender<ResponsePayload>,
-    db: sled::Db,
+    group_store: Box<dyn GroupStore>,
+    local_share_store: Box<dyn LocalShareStore>,
     keygen_runners: HashMap<String, Addr<MpcPlayerKG>>,
     offline_state_runners: HashMap<String, Addr<MpcPlayerO>>,
     signers: HashMap<String, Addr<Signer<EnrichedSignRequest>>>,
@@ -70,6 +68,8 @@ impl Coordinator {
         });
         let sink: Box<dyn Sink<CoreMessage, Error=anyhow::Error>> = Box::new(sink);
         let pk = PublicKey::from_secret_key(&sk).serialize_compressed().encode_hex();
+        let group_store = Box::new(SledDbGroupStore::new(db.clone()));
+        let local_share_store = Box::new(SledDbLocalShareStore::new(db));
 
         Self::create(|ctx| {
             ctx.add_stream(stream);
@@ -77,7 +77,8 @@ impl Coordinator {
                 sk: sk.serialize().to_vec(),
                 pk_str: pk,
                 tx_res,
-                db,
+                group_store,
+                local_share_store,
                 keygen_runners: HashMap::new(),
                 offline_state_runners: HashMap::new(),
                 signers: HashMap::new(),
@@ -110,7 +111,7 @@ impl Coordinator {
             ctx.address().recipient(),
             ctx.address().recipient(),
         ).start();
-        let _ = self.save_group(group);
+        let _ = self.group_store.save_group(group);
         self.keygen_runners.insert(room, player);
         Ok(())
     }
@@ -118,7 +119,7 @@ impl Coordinator {
     fn handle_sign_request(&mut self, req: SignPayload, ctx: &mut Context<Self>) -> Result<()> {
         prom::COUNTER_REQUESTS_SIGN_RECEIVED.inc();
         log::info!("Received request", { request: serde_json::to_string( &req).unwrap() });
-        let local_share = self.retrieve_local_share(req.public_key.clone()).context("Retrieve local share.")?;
+        let local_share = self.local_share_store.retrieve_local_share(req.public_key.clone()).context("Retrieve local share.")?;
         let group = PublicKeyGroup::new(
             local_share.public_keys,
             local_share.share.t,
@@ -131,7 +132,7 @@ impl Coordinator {
             local_share.share.t,
             self.pk_str.clone(),
         );
-        let _ = self.save_group(subgroup.clone());
+        let _ = self.group_store.save_group(subgroup.clone());
         let (indices, errors): (Vec<Option<usize>>, Vec<_>) = req.participant_public_keys.clone().into_iter().map(
             |k| group.get_index(&k)
         ).partition(Option::is_some);
@@ -221,7 +222,7 @@ impl Coordinator {
 
     fn valid_sender_and_receiver(&mut self, msg: WireMessage) -> Result<()> {
         let group_id = self.get_group_id(&msg.room).context("extract group_id")?;
-        let group = self.retrieve_group(group_id.to_string()).context("Retrieve group.")?;
+        let group = self.group_store.retrieve_group(group_id.to_string()).context("Retrieve group.")?;
         group.get_index(&msg.sender_public_key).map_or(Err(CoordinatorError::WrongPublicKey), |_| Ok(())).context("Validate sender.")?;
         let m = serde_json::from_str::<GenericProtocolMessage>(&msg.payload).context("parse GenericProtocolMessage")?;
         match m.receiver {
@@ -242,7 +243,7 @@ impl Coordinator {
         match m.receiver {
             Some(receiver) => {
                 let group_id = self.get_group_id(&msg.room).context("extract group_id")?;
-                let group = self.retrieve_group(group_id.to_string()).context("Retrieve group.")?;
+                let group = self.group_store.retrieve_group(group_id.to_string()).context("Retrieve group.")?;
                 let encrypted = group.encrypt(receiver as usize, m.body.to_string().as_str()).context("encrypt")?;
                 let encrypted_message = Encrypted {
                     encrypted,
@@ -422,47 +423,6 @@ impl Coordinator {
         })
             .await;
     }
-    fn save_group(&mut self, group: PublicKeyGroup) -> Result<()> {
-        let value = serde_json::to_vec_pretty(&group).context("serialize local share")?;
-        let key = group.get_group_id();
-        let ov: Option<&[u8]> = None;
-        let nv: Option<&[u8]> = Some(value.as_slice()); // TODO: Encrypt payload
-        let _ = self.db.compare_and_swap(
-            key.as_bytes(),      // key
-            ov, // old value, None for not present
-            nv, // new value, None for delete
-        ).context("Save to db.")?;
-        Ok(())
-    }
-    fn retrieve_group(&mut self, group_id: String) -> Result<PublicKeyGroup> {
-        let group = self.db.get(group_id.as_bytes())?
-            .ok_or_else(|| CoordinatorError::GroupNotFound(group_id.clone()))
-            .context("Retrieving group.")?;
-        let group = serde_json::from_slice::<PublicKeyGroup>(group.as_ref())
-            .context("Decode group.")?;
-        Ok(group)
-    }
-    fn save_local_share(&mut self, local_share: StoredLocalShare) -> Result<()> {
-        let out = serde_json::to_vec_pretty(&local_share).context("serialize local share")?;
-        let sum_pk_bytes = local_share.share.public_key().to_bytes(true);
-        let sum_pk = hex::encode(sum_pk_bytes.deref());
-        let ov: Option<&[u8]> = None;
-        let nv: Option<&[u8]> = Some(out.as_slice()); // TODO: Encrypt payload
-        let _ = self.db.compare_and_swap(
-            sum_pk.as_bytes(),      // key
-            ov, // old value, None for not present
-            nv, // new value, None for delete
-        ).context("Save to db.")?;
-        Ok(())
-    }
-    fn retrieve_local_share(&mut self, public_key: String) -> Result<StoredLocalShare> {
-        let local_share = self.db.get(public_key.as_bytes())?
-            .ok_or_else(|| CoordinatorError::LocalShareNotFound(public_key.clone()))
-            .context("Retrieving local share.")?;
-        let local_share = serde_json::from_slice::<StoredLocalShare>(local_share.as_ref())
-            .context("Decode local share.")?;
-        Ok(local_share)
-    }
 }
 
 impl Actor for Coordinator {
@@ -522,7 +482,7 @@ impl Handler<ProtocolOutputKG> for Coordinator
         log::info!("Public key is {:?}", sum_pk);
         let _share = msg.output.clone();
         let request_id = msg.input.request_id.clone();
-        let saved = self.save_local_share(StoredLocalShare {
+        let saved = self.local_share_store.save_local_share(StoredLocalShare {
             public_keys: msg.input.public_keys,
             own_public_key: self.pk_str.clone(),
             share: msg.output,
