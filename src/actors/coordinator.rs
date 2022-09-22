@@ -27,7 +27,7 @@ use crate::actors::msg_utils::describe_message;
 use crate::actors::types::SignTask;
 use crate::api::ResponsePayload;
 use crate::core::{CoreMessage, MpcGroup, PublicKeyGroup};
-use crate::prom;
+use crate::{prom, SignPayload};
 use crate::utils;
 use crate::wire::WireMessage;
 
@@ -107,6 +107,69 @@ impl Coordinator {
         })
     }
 
+    fn handle_sign_request(&mut self, req: SignPayload, ctx: &mut Context<Self>) -> Result<()> {
+        prom::COUNTER_REQUESTS_SIGN_RECEIVED.inc();
+        log::info!("Received request", { request: serde_json::to_string( &req).unwrap() });
+        let local_share = self.retrieve_local_share(req.public_key.clone()).context("Retrieve local share.")?;
+        let group = PublicKeyGroup::new(
+            local_share.public_keys,
+            local_share.share.t,
+            self.pk_str.clone(),
+        );
+        // let public_keys = local_share.public_keys;
+        // public_keys.iter().position(|&r| *r == k)
+        let subgroup = PublicKeyGroup::new(
+            req.participant_public_keys.clone(),
+            local_share.share.t,
+            self.pk_str.clone(),
+        );
+        let _ = self.save_group(subgroup.clone());
+        let (indices, errors): (Vec<Option<usize>>, Vec<_>) = req.participant_public_keys.clone().into_iter().map(
+            |k| group.get_index(&k)
+        ).partition(Option::is_some);
+
+        let s_l: Vec<u16> = if indices.len() != (local_share.share.t + 1) as usize {
+            Err(GroupError::WrongNumberOfParticipants)
+        } else if !errors.is_empty() {
+            Err(GroupError::WrongPublicKeys)
+        } else {
+            Ok(indices.into_iter().map(|o| o.expect("Index") as u16).collect())
+        }.context("Find index of participants")?;
+
+        let _ = self.tx_res.send(ResponsePayload {
+            request_id: req.request_id.clone(),
+            result: None,
+            request_type: "SIGN".to_owned(),
+            request_status: "PROCESSING".to_owned(),
+        });
+        let _index_in_group = group.get_i();
+        let index_in_s_l = subgroup.get_i();
+        let room = req.request_id.clone() + "@" + subgroup.get_group_id().as_str();
+
+        let req = EnrichedSignRequest {
+            inner: req,
+            room: room.clone(),
+            i: index_in_s_l,
+            s_l: s_l.clone(),
+        };
+        let _s = serde_json::to_string(&local_share.share);
+        // log::debug!("Local share is {:}", s.unwrap());
+        let state = OfflineStage::new(index_in_s_l, s_l, local_share.share);
+        log::debug!("Party index is {:?}", index_in_s_l);
+        // log::debug!("OfflineStage is {:?}", state);
+        let state = state.context("Create state machine")?;
+        let player = MpcPlayer::new(
+            req,
+            room.clone(),
+            index_in_s_l,
+            state,
+            ctx.address().recipient(),
+            ctx.address().recipient(),
+            ctx.address().recipient(),
+        ).start();
+        self.offline_state_runners.insert(room, player);
+        Ok(())
+    }
 
     fn get_group_id<'a>(&mut self, room: &'a str) -> Result<&'a str> {
         let split = room.split('@').collect::<Vec<&str>>();
@@ -399,74 +462,6 @@ impl Handler<KeygenRequest> for Coordinator {
     }
 }
 
-impl Handler<SignRequest> for Coordinator {
-    type Result = Result<()>;
-
-    fn handle(&mut self, req: SignRequest, ctx: &mut Context<Self>) -> Self::Result {
-        prom::COUNTER_REQUESTS_SIGN_RECEIVED.inc();
-        log::info!("Received request", { request: serde_json::to_string( &req).unwrap() });
-        let local_share = self.retrieve_local_share(req.public_key.clone()).context("Retrieve local share.")?;
-        let group = PublicKeyGroup::new(
-            local_share.public_keys,
-            local_share.share.t,
-            self.pk_str.clone(),
-        );
-        // let public_keys = local_share.public_keys;
-        // public_keys.iter().position(|&r| *r == k)
-        let subgroup = PublicKeyGroup::new(
-            req.participant_public_keys.clone(),
-            local_share.share.t,
-            self.pk_str.clone(),
-        );
-        let _ = self.save_group(subgroup.clone());
-        let (indices, errors): (Vec<Option<usize>>, Vec<_>) = req.participant_public_keys.clone().into_iter().map(
-            |k| group.get_index(&k)
-        ).partition(Option::is_some);
-
-        let s_l: Vec<u16> = if indices.len() != (local_share.share.t + 1) as usize {
-            Err(GroupError::WrongNumberOfParticipants)
-        } else if !errors.is_empty() {
-            Err(GroupError::WrongPublicKeys)
-        } else {
-            Ok(indices.into_iter().map(|o| o.expect("Index") as u16).collect())
-        }.context("Find index of participants")?;
-
-        let _ = self.tx_res.send(ResponsePayload {
-            request_id: req.request_id.clone(),
-            result: None,
-            request_type: "SIGN".to_owned(),
-            request_status: "PROCESSING".to_owned(),
-        });
-        let _index_in_group = group.get_i();
-        let index_in_s_l = subgroup.get_i();
-        let room = req.request_id.clone() + "@" + subgroup.get_group_id().as_str();
-
-        let req = EnrichedSignRequest {
-            inner: req,
-            room: room.clone(),
-            i: index_in_s_l,
-            s_l: s_l.clone(),
-        };
-        let _s = serde_json::to_string(&local_share.share);
-        // log::debug!("Local share is {:}", s.unwrap());
-        let state = OfflineStage::new(index_in_s_l, s_l, local_share.share);
-        log::debug!("Party index is {:?}", index_in_s_l);
-        // log::debug!("OfflineStage is {:?}", state);
-        let state = state.context("Create state machine")?;
-        let player = MpcPlayer::new(
-            req,
-            room.clone(),
-            index_in_s_l,
-            state,
-            ctx.address().recipient(),
-            ctx.address().recipient(),
-            ctx.address().recipient(),
-        ).start();
-        self.offline_state_runners.insert(room, player);
-        Ok(())
-    }
-}
-
 impl Handler<ProtocolError<KeygenError, IncomingMessage<Msg<KeygenProtocolMessage>>>> for Coordinator {
     type Result = ();
 
@@ -656,6 +651,9 @@ impl Handler<CoordinatorMessage> for Coordinator
                         log::error!("Failed encrypt message: {}", e);
                     }
                 }
+            }
+            CoordinatorMessage::SignRequest(req) => {
+                self.handle_sign_request(req, ctx);
             }
             _ => {}
         }

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use anyhow::{Result};
 use serde_json::value::RawValue;
 use crate::core::CoreMessage;
+use crate::SignPayload;
 use crate::wire::WireMessage;
 
 #[derive(Message)]
@@ -18,18 +19,9 @@ pub struct KeygenRequest {
     pub t: u16,
 }
 
-#[derive(Message, Serialize, Deserialize, Clone, Debug)]
-#[rtype(result = "Result<()>")]
-pub struct SignRequest {
-    pub request_id: String,
-    pub public_key: String,
-    pub participant_public_keys: Vec<String>,
-    pub message: String,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct EnrichedSignRequest {
-    pub inner: SignRequest,
+    pub inner: SignPayload,
     pub room: String,
     pub i: u16,
     pub s_l: Vec<u16>,
@@ -57,6 +49,7 @@ pub(crate) enum CoordinatorMessage {
     Incoming(WireMessage),
     Retry(RetryMessage),
     Outgoing(CoreMessage),
+    SignRequest(SignPayload)
 }
 
 #[derive(Message, Clone)]
