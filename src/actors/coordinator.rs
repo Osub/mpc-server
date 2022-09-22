@@ -634,7 +634,7 @@ impl Handler<ProtocolOutputS> for Coordinator
 impl StreamHandler<Result<CoordinatorMessage>> for Coordinator
 {
     fn handle(&mut self, msg: Result<CoordinatorMessage>, ctx: &mut Context<Self>) {
-        if let Ok(msg) = msg.context("Invalid IncomingEnvlope") {
+        if let Ok(msg) = msg.context("invalid CoordinatorMessage") {
             self.handle_coordinator_message(msg, ctx);
         }
     }
