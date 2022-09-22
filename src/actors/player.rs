@@ -6,18 +6,20 @@ use kv_log_macro::debug;
 use round_based::{Msg, StateMachine};
 use serde::Serialize;
 use tokio::time::{self};
+use crate::actors::messages::CoordinatorMessage;
 
 use crate::actors::msg_utils::describe_message;
+use crate::core::CoreMessage;
 
-use super::messages::{IncomingMessage, MaybeProceed, OutgoingEnvelope, ProtocolError, ProtocolOutput};
+use super::messages::{IncomingMessage, MaybeProceed, ProtocolError, ProtocolOutput};
 
-pub struct MpcPlayer<I: Send + Clone + Unpin + 'static, SM, M: Send + Clone, E: Send, O: Send> {
+pub(crate) struct MpcPlayer<I: Send + Clone + Unpin + 'static, SM, M: Send + Clone, E: Send, O: Send> {
     input: I,
     room: String,
     index: u16,
     msg_count: u16,
     coordinator: Recipient<ProtocolError<E, IncomingMessage<Msg<M>>>>,
-    message_broker: Recipient<OutgoingEnvelope>,
+    message_broker: Recipient<CoordinatorMessage>,
     state: SM,
     deadline: Option<time::Instant>,
     current_round: Option<u16>,
@@ -33,14 +35,14 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         SM::MessageBody: Send + Serialize + Clone,
         SM::Output: Send,
 {
-    pub fn new(
+    pub(crate) fn new(
         input: I,
         room: String,
         index: u16,
         state: SM,
         coordinator: Recipient<ProtocolError<SM::Err, IncomingMessage<Msg<SM::MessageBody>>>>,
         result_collector: Recipient<ProtocolOutput<I, SM::Output>>,
-        message_broker: Recipient<OutgoingEnvelope>,
+        message_broker: Recipient<CoordinatorMessage>,
     ) -> Self
         where
             SM: StateMachine + Debug + Unpin,
@@ -116,10 +118,10 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
 
         for msg in self.state.message_queue().drain(..) {
             if let Ok(serialized) = serde_json::to_string(&msg) {
-                let _ = self.message_broker.do_send(OutgoingEnvelope {
+                let _ = self.message_broker.do_send(CoordinatorMessage::Outgoing (CoreMessage{
                     room: self.room.clone(),
                     message: serialized,
-                });
+                }));
             }
         }
     }

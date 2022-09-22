@@ -129,7 +129,7 @@ impl Coordinator {
         }
     }
 
-    fn maybe_encrypt(&mut self, msg: &mut OutgoingEnvelope) -> Result<()> {
+    fn maybe_encrypt(&mut self, msg: &mut CoreMessage) -> Result<()> {
         let mut m = serde_json::from_str::<GenericProtocolMessage>(&msg.message).context("parse GenericProtocolMessage")?;
         match m.receiver {
             Some(receiver) => {
@@ -298,16 +298,13 @@ impl Coordinator {
         }
     }
 
-    async fn send_one(envelope: OutgoingEnvelope) {
+    async fn send_one(envelope: CoreMessage) {
         critical_section::<Self, _>(async {
             let mut sink = with_ctx(|actor: &mut Self, _| actor.sink.take())
                 .expect("Sink to be present");
             log::debug!("Sending message", { room: format!("\"{}\"", &envelope.room), protocolMessage: describe_message(&envelope.message)});
             // Send the request
-            let _ = sink.send(CoreMessage {
-                room: envelope.room,
-                message: envelope.message,
-            }).await;
+            let _ = sink.send(envelope).await;
 
             // Put the sink back, and if the send was successful,
             // record the in-flight request.
@@ -497,22 +494,6 @@ impl Handler<ProtocolError<OfflineStageError, IncomingMessage<Msg<OfflineProtoco
     }
 }
 
-impl Handler<OutgoingEnvelope> for Coordinator
-{
-    type Result = ();
-
-    fn handle(&mut self, mut msg: OutgoingEnvelope, ctx: &mut Context<Self>) {
-        match self.maybe_encrypt(&mut msg) {
-            Ok(_) => {
-                ctx.spawn(Self::send_one(msg).interop_actor(self));
-            }
-            Err(e) => {
-                log::error!("Failed encrypt message: {}", e);
-            }
-        }
-    }
-}
-
 impl Handler<ProtocolOutput<KeygenRequest, LocalKey<Secp256k1>>> for Coordinator
 {
     type Result = ();
@@ -659,6 +640,16 @@ impl Handler<CoordinatorMessage> for Coordinator
                     self.handle_incoming_unsafe(msg.message, msg.initial_timestamp, msg.attempts, ctx);
                 } else {
                     self.handle_retry(msg, ctx);
+                }
+            }
+            CoordinatorMessage::Outgoing(mut msg) =>{
+                match self.maybe_encrypt(&mut msg) {
+                    Ok(_) => {
+                        ctx.spawn(Self::send_one(msg).interop_actor(self));
+                    }
+                    Err(e) => {
+                        log::error!("Failed encrypt message: {}", e);
+                    }
                 }
             }
             _ => {}

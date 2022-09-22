@@ -4,17 +4,19 @@ use kv_log_macro as log;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::SignatureRecid;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{PartialSignature, SignManual};
 use round_based::Msg;
+use crate::actors::messages::CoordinatorMessage;
 
 use crate::actors::types::SignTask;
+use crate::core::CoreMessage;
 
-use super::messages::{IncomingMessage, OutgoingEnvelope, ProtocolOutput};
+use super::messages::{IncomingMessage, ProtocolOutput};
 
 pub struct Signer<I: Send> {
     input: I,
     task: SignTask,
     partial_sigs: Vec<PartialSignature>,
     result_collector: Recipient<ProtocolOutput<I, SignatureRecid>>,
-    message_broker: Recipient<OutgoingEnvelope>,
+    message_broker: Recipient<CoordinatorMessage>,
 }
 
 impl<I> Signer<I>
@@ -25,7 +27,7 @@ impl<I> Signer<I>
         input: I,
         task: SignTask,
         result_collector: Recipient<ProtocolOutput<I, SignatureRecid>>,
-        message_broker: Recipient<OutgoingEnvelope>,
+        message_broker: Recipient<CoordinatorMessage>,
     ) -> Self
     {
         let t = task.t;
@@ -52,10 +54,10 @@ impl<I> Signer<I>
         };
         if let Ok(serialized) = serde_json::to_string(&sig_msg) {
             // log::debug!("Sending message {:?}", serde_json::to_string(&sig_msg));
-            let _ = self.message_broker.do_send(OutgoingEnvelope {
+            let _ = self.message_broker.do_send(CoordinatorMessage::Outgoing (CoreMessage{
                 room: self.task.room.clone(),
                 message: serialized,
-            });
+            }));
         }
 
         Ok(())
