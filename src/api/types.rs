@@ -1,4 +1,4 @@
-use either::Either;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -23,5 +23,3 @@ pub struct ResponsePayload {
     pub request_type: String,
     pub request_status: String,
 }
-
-pub type Payload = Either<KeygenPayload, SignPayload>;

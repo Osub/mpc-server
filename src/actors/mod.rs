@@ -9,11 +9,11 @@ use actix::Addr;
 pub use signer::*;
 pub use player::*;
 pub use coordinator::*;
-use crate::core::{Payload, KeygenPayload, SignPayload};
-use either::Either;
+use crate::core::Request;
 use messages::{KeygenRequest, SignRequest};
 
 use kv_log_macro as log;
+use crate::api::{KeygenPayload, SignPayload};
 
 fn handle_keygen(coordinator: &Addr<Coordinator>, own_public_key: String, payload: KeygenPayload){
     let KeygenPayload { request_id, public_keys, t } = payload;
@@ -51,15 +51,15 @@ async fn handle_sign(coordinator: &Addr<Coordinator>, own_public_key: String, pa
     }
 }
 
-pub async fn handle(coordinator: &Addr<Coordinator>, own_public_key: String, payload: Payload) {
-    match payload {
-        Either::Left(payload) => {
-            log::info!("Received request", { payload: serde_json::to_string(&payload).unwrap()});
-            handle_keygen(coordinator, own_public_key, payload);
+pub async fn handle(coordinator: &Addr<Coordinator>, own_public_key: String, request: Request) {
+    match request {
+        Request::Keygen(request) => {
+            log::info!("Received request", { request: serde_json::to_string(&request).unwrap()});
+            handle_keygen(coordinator, own_public_key, request);
         }
-        Either::Right(payload) => {
-            log::info!("Received request", { payload: serde_json::to_string(&payload).unwrap()});
-            handle_sign(coordinator, own_public_key, payload).await;
+        Request::Sign(request) => {
+            log::info!("Received request", { request: serde_json::to_string(&request).unwrap()});
+            handle_sign(coordinator, own_public_key, request).await;
         }
     }
 }

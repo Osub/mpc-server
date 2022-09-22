@@ -24,7 +24,8 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::actors::msg_utils::describe_message;
 use crate::actors::types::SignTask;
-use crate::core::{CoreMessage, MpcGroup, PublicKeyGroup, ResponsePayload};
+use crate::api::ResponsePayload;
+use crate::core::{CoreMessage, MpcGroup, PublicKeyGroup};
 use crate::prom;
 use crate::utils;
 use crate::wire::WireMessage;

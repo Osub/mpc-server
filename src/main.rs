@@ -10,7 +10,6 @@ use actix_web::{App, HttpResponse, HttpServer, middleware, Responder, web};
 use anyhow::{Context, Result};
 use curv::arithmetic::Converter;
 use curv::BigInt;
-use either::Either;
 use prometheus::{Encoder, TextEncoder};
 use secp256k1::{PublicKey, SecretKey};
 use structopt::StructOpt;
@@ -20,7 +19,8 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use cli::Cli;
 
 use crate::actors::{Coordinator, handle};
-use crate::core::{KeygenPayload, Payload, ResponsePayload, SignPayload};
+use crate::api::{KeygenPayload, ResponsePayload, SignPayload};
+use crate::core::Request;
 use crate::key::decrypt;
 use crate::transport::{join_computation_via_messenger, join_computation_via_redis};
 
@@ -32,6 +32,7 @@ mod key;
 mod prom;
 mod utils;
 pub mod wire;
+mod api;
 
 #[derive(Debug, Error)]
 enum SetupError {
@@ -43,7 +44,7 @@ enum SetupError {
 }
 
 struct AppState {
-    tx: UnboundedSender<Payload>,
+    tx: UnboundedSender<Request>,
     tx_res: UnboundedSender<ResponsePayload>,
     results_db: sled::Db,
 }
@@ -92,7 +93,7 @@ async fn keygen(data: web::Data<AppState>, req: web::Json<KeygenPayload>) -> imp
         request_type: "KEYGEN".to_owned(),
         request_status: "RECEIVED".to_owned(),
     });
-    match data.tx.send(Either::Left(req.0)) {
+    match data.tx.send(Request::Keygen(req.0)) {
         Ok(_) => {
             HttpResponse::Ok().body("Request received!")
         }
@@ -115,7 +116,7 @@ async fn sign(data: web::Data<AppState>, req: web::Json<SignPayload>) -> impl Re
                 request_type: "SIGN".to_owned(),
                 request_status: "RECEIVED".to_owned(),
             });
-            match data.tx.send(Either::Right(req.0)) {
+            match data.tx.send(Request::Sign(req.0)) {
                 Ok(_) => {
                     HttpResponse::Ok().body("Request received!")
                 }
@@ -185,7 +186,7 @@ async fn precheck(args: Cli) -> Result<()> {
     }
 }
 
-async fn bootstrap(args: Cli, rx: UnboundedReceiver<Payload>, tx_res: UnboundedSender<ResponsePayload>) {
+async fn bootstrap(args: Cli, rx: UnboundedReceiver<Request>, tx_res: UnboundedSender<ResponsePayload>) {
     let args0 = args.clone();
     match (args0.messenger_address, args0.redis_url) {
         (Some(_), None) => {
@@ -200,7 +201,7 @@ async fn bootstrap(args: Cli, rx: UnboundedReceiver<Payload>, tx_res: UnboundedS
     }
 }
 
-async fn use_messenger(args: Cli, mut rx: UnboundedReceiver<Payload>, tx_res: UnboundedSender<ResponsePayload>) {
+async fn use_messenger(args: Cli, mut rx: UnboundedReceiver<Request>, tx_res: UnboundedSender<ResponsePayload>) {
     let (sk, pk) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't get secret key.").unwrap();
     let own_public_key = hex::encode(pk.serialize_compressed());
     let local_shares_path = args.db_path.join("local_shares");
@@ -215,7 +216,7 @@ async fn use_messenger(args: Cli, mut rx: UnboundedReceiver<Payload>, tx_res: Un
 }
 
 
-async fn use_redis(args: Cli, mut rx: UnboundedReceiver<Payload>, tx_res: UnboundedSender<ResponsePayload>) {
+async fn use_redis(args: Cli, mut rx: UnboundedReceiver<Request>, tx_res: UnboundedSender<ResponsePayload>) {
     let (sk, pk) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't get secret key.").unwrap();
     let own_public_key = hex::encode(pk.serialize_compressed());
     let local_shares_path = args.db_path.join("local_shares");
@@ -238,7 +239,7 @@ async fn handle_response(results_db: sled::Db, mut rx_res: UnboundedReceiver<Res
 fn main() -> std::io::Result<()> {
     json_env_logger::init();
     let args: Cli = Cli::from_args();
-    let (tx, rx) = unbounded_channel::<Payload>();
+    let (tx, rx) = unbounded_channel::<Request>();
     let (tx_res, rx_res) = unbounded_channel::<ResponsePayload>();
 
     let results_path = args.db_path.join("results");
