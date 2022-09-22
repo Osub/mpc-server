@@ -85,7 +85,7 @@ impl Coordinator {
         let stream = stream.and_then(|msg| async move {
             Ok(IncomingEnvelope {
                 room: msg.0.room,
-                message: msg.0.message,
+                message: msg.0.payload,
                 sender_public_key: msg.0.sender_public_key,
             })
         });

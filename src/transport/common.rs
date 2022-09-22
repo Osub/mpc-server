@@ -45,7 +45,7 @@ fn do_parse_signed(msg: String) -> Result<WireMessage> {
     let sig = Signature::parse_slice(sbytes.as_slice())?;
 
     let mut hasher = Sha256::new();
-    hasher.update(signed.message.as_bytes());
+    hasher.update(signed.payload.as_bytes());
     let hash = hasher.finalize();
     let hbytes = hash.as_slice().try_into().context("Create hash")?;
     let message = Message::parse(hbytes);
@@ -68,7 +68,7 @@ pub fn sign_envelope(key: &SecretKey, pub_key: &str, envelope: CoreMessage) -> R
     let signature = hex::encode(sig.serialize());
     let signed = WireMessage {
         room: envelope.room,
-        message: envelope.message,
+        payload: envelope.message,
         sender_public_key: pub_key.to_string(),
         signature,
     };
