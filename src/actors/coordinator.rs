@@ -24,7 +24,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::actors::msg_utils::describe_message;
 use crate::actors::types::SignTask;
-use crate::core::{MpcGroup, PublicKeyGroup, ResponsePayload};
+use crate::core::{CoreMessage, MpcGroup, PublicKeyGroup, ResponsePayload};
 use crate::prom;
 use crate::utils;
 
@@ -73,14 +73,14 @@ pub struct Coordinator {
     keygen_runners: HashMap<String, Addr<MpcPlayer<KeygenRequest, Keygen, <Keygen as StateMachine>::MessageBody, <Keygen as StateMachine>::Err, <Keygen as StateMachine>::Output>>>,
     offline_state_runners: HashMap<String, Addr<MpcPlayer<EnrichedSignRequest, OfflineStage, <OfflineStage as StateMachine>::MessageBody, <OfflineStage as StateMachine>::Err, <OfflineStage as StateMachine>::Output>>>,
     signers: HashMap<String, Addr<Signer<EnrichedSignRequest>>>,
-    sink: Option<Pin<Box<dyn Sink<Envelope, Error=anyhow::Error>>>>,
+    sink: Option<Pin<Box<dyn Sink<CoreMessage, Error=anyhow::Error>>>>,
 }
 
 impl Coordinator {
     pub fn new<Si, St>(sk: SecretKey, tx_res: UnboundedSender<ResponsePayload>, db: sled::Db, stream: St, sink: Si) -> Addr<Self>
         where
             St: Stream<Item=Result<SignedEnvelope<String>>> + 'static,
-            Si: Sink<Envelope, Error=anyhow::Error> + 'static,
+            Si: Sink<CoreMessage, Error=anyhow::Error> + 'static,
     {
         let stream = stream.and_then(|msg| async move {
             Ok(IncomingEnvelope {
@@ -89,7 +89,7 @@ impl Coordinator {
                 sender_public_key: msg.sender_public_key,
             })
         });
-        let sink: Box<dyn Sink<Envelope, Error=anyhow::Error>> = Box::new(sink);
+        let sink: Box<dyn Sink<CoreMessage, Error=anyhow::Error>> = Box::new(sink);
 
         Self::create(|ctx| {
             ctx.add_stream(stream);
@@ -314,7 +314,7 @@ impl Coordinator {
                 .expect("Sink to be present");
             log::debug!("Sending message", { room: format!("\"{}\"", &envelope.room), protocolMessage: describe_message(&envelope.message)});
             // Send the request
-            let _ = sink.send(Envelope {
+            let _ = sink.send(CoreMessage {
                 room: envelope.room,
                 message: envelope.message,
             }).await;

@@ -37,13 +37,6 @@ pub struct EnrichedSignRequest {
 
 #[derive(Message, Serialize, Deserialize, Clone)]
 #[rtype(result = "()")]
-pub struct Envelope {
-    pub room: String,
-    pub message: String,
-}
-
-#[derive(Message, Serialize, Deserialize, Clone)]
-#[rtype(result = "()")]
 pub struct EcdsaSignature {
     pub r: String,
     pub s: String,

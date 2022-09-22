@@ -6,7 +6,8 @@ use secp256k1::{Message, PublicKey, SecretKey, sign, Signature, verify};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::actors::messages::{Envelope, SignedEnvelope};
+use crate::actors::messages::SignedEnvelope;
+use crate::core::CoreMessage;
 
 #[derive(Debug, Error)]
 enum VerifyError {
@@ -57,7 +58,7 @@ fn do_parse_signed(msg: String) -> Result<SignedEnvelope<String>> {
     Ok(out)
 }
 
-pub fn sign_envelope(key: &SecretKey, pub_key: &str, envelope: Envelope) -> Result<SignedEnvelope<String>> {
+pub fn sign_envelope(key: &SecretKey, pub_key: &str, envelope: CoreMessage) -> Result<SignedEnvelope<String>> {
     let mut hasher = Sha256::new();
     hasher.update(envelope.message.as_bytes());
     let hash = hasher.finalize();

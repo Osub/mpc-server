@@ -4,7 +4,8 @@ use redis::{AsyncCommands, Client, Msg};
 use redis::aio::Connection;
 use secp256k1::{PublicKey, SecretKey};
 
-use crate::actors::messages::{Envelope, SignedEnvelope};
+use crate::actors::messages::SignedEnvelope;
+use crate::core::CoreMessage;
 use crate::transport::{parse_signed, sign_envelope, take_non_owned};
 
 pub struct RedisClient {
@@ -53,7 +54,7 @@ pub async fn join_computation_via_redis(
     key: SecretKey,
 ) -> Result<(
     impl Stream<Item=Result<SignedEnvelope<String>>>,
-    impl Sink<Envelope, Error=anyhow::Error>,
+    impl Sink<CoreMessage, Error=anyhow::Error>,
 )>
 {
     let key = Box::new(key);
@@ -70,7 +71,7 @@ pub async fn join_computation_via_redis(
         .filter_map(parse_signed)
         .filter(take_non_owned(own_pub_key));
     // Construct channel of outgoing messages
-    let outgoing = futures::sink::unfold((client, key, pub_key), |(mut client, key, pub_key), unsigned: Envelope| async move {
+    let outgoing = futures::sink::unfold((client, key, pub_key), |(mut client, key, pub_key), unsigned: CoreMessage| async move {
         let signed = sign_envelope(key.as_ref(), pub_key.as_ref(), unsigned).context("Failed to sign")?;
         let serialized = serde_json::to_string(&signed)?;
         client

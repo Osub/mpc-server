@@ -31,6 +31,7 @@ mod transport;
 mod key;
 mod prom;
 mod utils;
+mod wire;
 
 #[derive(Debug, Error)]
 enum SetupError {
