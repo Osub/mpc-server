@@ -53,11 +53,6 @@ pub struct RetryMessage {
     pub message: WireMessage,
 }
 
-
-
-
-
-
 #[derive(Message, Serialize, Deserialize, Clone)]
 #[rtype(result = "()")]
 pub(crate) enum CoordinatorMessage {
@@ -66,32 +61,11 @@ pub(crate) enum CoordinatorMessage {
     Outgoing(CoreMessage),
 }
 
-#[derive(Message)]
-#[rtype(result = "()")]
-pub struct ProtocolMessage<M> {
-    pub room: String,
-    pub message: M,
-}
-
-#[derive(Message)]
-#[rtype(result = "()")]
-pub struct ProtocolMessageAck {
-    pub room: String,
-    pub message_id: String,
-}
-
 #[derive(Message, Clone)]
 #[rtype(result = "()")]
 pub struct IncomingMessage<M: Clone> {
     pub room: String,
     pub wire_message: WireMessage,
-    pub message: M,
-}
-
-#[derive(Message)]
-#[rtype(result = "()")]
-pub struct OutgoingMessage<M> {
-    pub room: String,
     pub message: M,
 }
 
