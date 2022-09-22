@@ -21,13 +21,6 @@ pub struct EnrichedSignRequest {
 
 #[derive(Message, Serialize, Deserialize, Clone)]
 #[rtype(result = "()")]
-pub struct EcdsaSignature {
-    pub r: String,
-    pub s: String,
-}
-
-#[derive(Message, Serialize, Deserialize, Clone)]
-#[rtype(result = "()")]
 pub struct RetryMessage {
     pub initial_timestamp: u128,
     pub attempts: u16,
