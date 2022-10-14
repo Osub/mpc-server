@@ -6,10 +6,14 @@ use structopt::lazy_static::lazy_static;
 lazy_static! {
     pub static ref COUNTER_REQUESTS_SIGN_RECEIVED: IntCounter =
         register_int_counter!("requests_sign_received", "Number of sign requests received").unwrap();
+    pub static ref COUNTER_REQUESTS_SIGN_HANDLED: IntCounter =
+        register_int_counter!("requests_sign_handled", "Number of sign requests handled").unwrap();
     pub static ref COUNTER_REQUESTS_SIGN_DONE: IntCounter =
         register_int_counter!("requests_sign_done", "Number of sign requests done").unwrap();
     pub static ref COUNTER_REQUESTS_KEYGEN_RECEIVED: IntCounter =
         register_int_counter!("requests_keygen_received", "Number of keygen requests received").unwrap();
+    pub static ref COUNTER_REQUESTS_KEYGEN_HANDLED: IntCounter =
+        register_int_counter!("requests_keygen_handled", "Number of keygen requests handled").unwrap();
     pub static ref COUNTER_REQUESTS_KEYGEN_DONE: IntCounter =
         register_int_counter!("requests_keygen_done", "Number of keygen requests done").unwrap();
     pub static ref COUNTER_MESSAGES_TOTAL_RECEIVED: IntCounter =

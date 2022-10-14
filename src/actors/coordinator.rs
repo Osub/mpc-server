@@ -92,8 +92,8 @@ impl Coordinator {
     }
 
     fn handle_keygen_request(&mut self, req: KeygenPayload, ctx: &mut Context<Self>) -> Result<()> {
-        log::info!("Received request", {request: serde_json::to_string(&req).unwrap()});
-        prom::COUNTER_REQUESTS_KEYGEN_RECEIVED.inc();
+        log::info!("Handling request", {request: serde_json::to_string(&req).unwrap_or("".to_string())});
+        prom::COUNTER_REQUESTS_KEYGEN_HANDLED.inc();
         let KeygenPayload { request_id, public_keys, t } = req.clone();
         let _ = self.tx_res.send(ResponsePayload {
             request_id,
@@ -121,8 +121,8 @@ impl Coordinator {
     }
 
     fn handle_sign_request(&mut self, req: SignPayload, ctx: &mut Context<Self>) -> Result<()> {
-        prom::COUNTER_REQUESTS_SIGN_RECEIVED.inc();
-        log::info!("Received request", { request: serde_json::to_string( &req).unwrap() });
+        log::info!("Handling request", {request: serde_json::to_string(&req).unwrap_or("".to_string())});
+        prom::COUNTER_REQUESTS_SIGN_HANDLED.inc();
         let local_share = self.local_share_store.retrieve_local_share(req.public_key.clone()).context("Retrieve local share.")?;
         let group = PublicKeyGroup::new(
             local_share.public_keys,
