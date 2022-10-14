@@ -16,23 +16,17 @@ use kv_log_macro as log;
 use crate::actors::messages::CoordinatorMessage;
 use crate::api::{KeygenPayload, SignPayload};
 
-fn handle_keygen(coordinator: &Addr<Coordinator>, payload: KeygenPayload){
-    coordinator.do_send(CoordinatorMessage::KeygenRequest(payload));
-}
-
-async fn handle_sign(coordinator: &Addr<Coordinator>, payload: SignPayload) {
-    coordinator.do_send(CoordinatorMessage::SignRequest (payload));
-}
-
 pub async fn handle(coordinator: &Addr<Coordinator>, request: Request) {
     match request {
         Request::Keygen(request) => {
-            log::info!("Received request", { request: serde_json::to_string(&request).unwrap()});
-            handle_keygen(coordinator, request);
+            let j_str = serde_json::to_string(&request).unwrap_or("".to_string());
+            log::info!("Received request", { request: j_str });
+            coordinator.do_send(CoordinatorMessage::KeygenRequest(request));
         }
         Request::Sign(request) => {
-            log::info!("Received request", { request: serde_json::to_string(&request).unwrap()});
-            handle_sign(coordinator, request).await;
+            let j_str = serde_json::to_string(&request).unwrap_or("".to_string());
+            log::info!("Received request", { request: j_str});
+            coordinator.do_send(CoordinatorMessage::SignRequest(request));
         }
     }
 }
