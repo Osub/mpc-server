@@ -1,4 +1,4 @@
-use prometheus::{self, IntCounter, TextEncoder, Encoder};
+use prometheus::{self, IntCounter};
 
 use prometheus::register_int_counter;
 use structopt::lazy_static::lazy_static;

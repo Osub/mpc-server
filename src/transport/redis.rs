@@ -4,8 +4,9 @@ use redis::{AsyncCommands, Client, Msg};
 use redis::aio::Connection;
 use secp256k1::{PublicKey, SecretKey};
 
-use crate::actors::messages::{Envelope, SignedEnvelope};
-use crate::transport::{parse_signed, sign_envelope};
+use crate::core::CoreMessage;
+use crate::transport::{parse_signed, sign_envelope, take_non_owned};
+use crate::wire::WireMessage;
 
 pub struct RedisClient {
     channel_name: String,
@@ -52,8 +53,8 @@ pub async fn join_computation_via_redis(
     redis_connection_string: String,
     key: SecretKey,
 ) -> Result<(
-    impl Stream<Item=Result<SignedEnvelope<String>>>,
-    impl Sink<Envelope, Error=anyhow::Error>,
+    impl Stream<Item=Result<WireMessage>>,
+    impl Sink<CoreMessage, Error=anyhow::Error>,
 )>
 {
     let key = Box::new(key);
@@ -67,24 +68,10 @@ pub async fn join_computation_via_redis(
         .subscribe()
         .await
         .context("subscribe")?
-        .filter_map(|msg| async move {
-            match msg {
-                Ok(msg) => { Some(parse_signed(msg)) }
-                Err(_) => { None }
-            }
-        })
-        .filter(
-            move |res: &Result<SignedEnvelope<String>>| {
-                futures_util::future::ready(match res {
-                    Ok(envelope) => {
-                        envelope.sender_public_key != own_pub_key
-                    }
-                    Err(_) => { true }
-                })
-            }
-        );
+        .filter_map(parse_signed)
+        .filter(take_non_owned(own_pub_key));
     // Construct channel of outgoing messages
-    let outgoing = futures::sink::unfold((client, key, pub_key), |(mut client, key, pub_key), unsigned: Envelope| async move {
+    let outgoing = futures::sink::unfold((client, key, pub_key), |(mut client, key, pub_key), unsigned: CoreMessage| async move {
         let signed = sign_envelope(key.as_ref(), pub_key.as_ref(), unsigned).context("Failed to sign")?;
         let serialized = serde_json::to_string(&signed)?;
         client

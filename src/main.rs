@@ -1,17 +1,15 @@
 extern crate base64;
 extern crate json_env_logger;
 
-use std::borrow::Borrow;
-use std::future::Future;
+
 use std::path::PathBuf;
 
-use ::redis::{Client, Commands, ConnectionLike};
+use ::redis::Client;
 use actix::prelude::*;
 use actix_web::{App, HttpResponse, HttpServer, middleware, Responder, web};
 use anyhow::{Context, Result};
 use curv::arithmetic::Converter;
 use curv::BigInt;
-use either::Either;
 use prometheus::{Encoder, TextEncoder};
 use secp256k1::{PublicKey, SecretKey};
 use structopt::StructOpt;
@@ -21,10 +19,10 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use cli::Cli;
 
 use crate::actors::{Coordinator, handle};
-use crate::core::{KeygenPayload, Payload, ResponsePayload, SignPayload};
+use crate::api::{KeygenPayload, RequestStatus, RequestType, ResponsePayload, SignPayload};
+use crate::core::Request;
 use crate::key::decrypt;
-use crate::redis::join_computation_via_redis;
-use crate::transport::join_computation;
+use crate::transport::{join_computation_via_messenger, join_computation_via_redis};
 
 mod core;
 mod actors;
@@ -32,7 +30,11 @@ mod cli;
 mod transport;
 mod key;
 mod prom;
-mod redis;
+mod utils;
+pub mod wire;
+mod api;
+mod storage;
+mod crypto;
 
 #[derive(Debug, Error)]
 enum SetupError {
@@ -44,7 +46,7 @@ enum SetupError {
 }
 
 struct AppState {
-    tx: UnboundedSender<Payload>,
+    tx: UnboundedSender<Request>,
     tx_res: UnboundedSender<ResponsePayload>,
     results_db: sled::Db,
 }
@@ -90,10 +92,10 @@ async fn keygen(data: web::Data<AppState>, req: web::Json<KeygenPayload>) -> imp
     let _ = data.tx_res.send(ResponsePayload {
         request_id: req.0.request_id.clone(),
         result: None,
-        request_type: "KEYGEN".to_owned(),
-        request_status: "RECEIVED".to_owned(),
+        request_type: RequestType::KEYGEN,
+        request_status: RequestStatus::RECEIVED,
     });
-    match data.tx.send(Either::Left(req.0)) {
+    match data.tx.send(Request::Keygen(req.0)) {
         Ok(_) => {
             HttpResponse::Ok().body("Request received!")
         }
@@ -113,10 +115,10 @@ async fn sign(data: web::Data<AppState>, req: web::Json<SignPayload>) -> impl Re
             let _ = data.tx_res.send(ResponsePayload {
                 request_id: req.0.request_id.clone(),
                 result: None,
-                request_type: "SIGN".to_owned(),
-                request_status: "RECEIVED".to_owned(),
+                request_type: RequestType::SIGN,
+                request_status: RequestStatus::RECEIVED,
             });
-            match data.tx.send(Either::Right(req.0)) {
+            match data.tx.send(Request::Sign(req.0)) {
                 Ok(_) => {
                     HttpResponse::Ok().body("Request received!")
                 }
@@ -175,7 +177,7 @@ async fn precheck(args: Cli) -> Result<()> {
         }
         (None, Some(url)) => {
             let client = Client::open(url)?;
-            client.get_connection().map_err(|_|{
+            client.get_connection().map_err(|_| {
                 SetupError::NoMessageQueueConnection
             })?;
             Ok(())
@@ -186,7 +188,7 @@ async fn precheck(args: Cli) -> Result<()> {
     }
 }
 
-async fn bootstrap(args: Cli, mut rx: UnboundedReceiver<Payload>, tx_res: UnboundedSender<ResponsePayload>) {
+async fn bootstrap(args: Cli, rx: UnboundedReceiver<Request>, tx_res: UnboundedSender<ResponsePayload>) {
     let args0 = args.clone();
     match (args0.messenger_address, args0.redis_url) {
         (Some(_), None) => {
@@ -201,38 +203,30 @@ async fn bootstrap(args: Cli, mut rx: UnboundedReceiver<Payload>, tx_res: Unboun
     }
 }
 
-async fn use_messenger(args: Cli, mut rx: UnboundedReceiver<Payload>, tx_res: UnboundedSender<ResponsePayload>) {
-    let (sk, pk) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't get secret key.").unwrap();
-    let own_public_key = hex::encode(pk.serialize_compressed());
+async fn use_messenger(args: Cli, mut rx: UnboundedReceiver<Request>, tx_res: UnboundedSender<ResponsePayload>) {
+    let (sk, _) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't get secret key.").unwrap();
     let local_shares_path = args.db_path.join("local_shares");
     let local_share_db: sled::Db = sled::open(local_shares_path).unwrap();
 
-    match join_computation(args.messenger_address.unwrap(), sk.clone()).await {
-        Ok((incoming, outgoing)) => {
-            let coordinator = Coordinator::new(sk, tx_res, local_share_db, incoming, outgoing);
-            while let Some(payload) = rx.recv().await {
-                handle(&coordinator, own_public_key.clone(), payload).await;
-            }
+    if let Ok((incoming, outgoing)) = join_computation_via_messenger(args.messenger_address.unwrap(), sk.clone()).await {
+        let coordinator = Coordinator::new(sk, tx_res, local_share_db, incoming, outgoing);
+        while let Some(payload) = rx.recv().await {
+            handle(&coordinator, payload).await;
         }
-        Err(_) => {}
     };
 }
 
 
-async fn use_redis(args: Cli, mut rx: UnboundedReceiver<Payload>, tx_res: UnboundedSender<ResponsePayload>) {
-    let (sk, pk) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't get secret key.").unwrap();
-    let own_public_key = hex::encode(pk.serialize_compressed());
+async fn use_redis(args: Cli, mut rx: UnboundedReceiver<Request>, tx_res: UnboundedSender<ResponsePayload>) {
+    let (sk, _) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't get secret key.").unwrap();
     let local_shares_path = args.db_path.join("local_shares");
     let local_share_db: sled::Db = sled::open(local_shares_path).unwrap();
 
-    match join_computation_via_redis(args.redis_url.unwrap(), sk.clone()).await {
-        Ok((incoming, outgoing)) => {
-            let coordinator = Coordinator::new(sk, tx_res, local_share_db, incoming, outgoing);
-            while let Some(payload) = rx.recv().await {
-                handle(&coordinator, own_public_key.clone(), payload).await;
-            }
+    if let Ok((incoming, outgoing)) = join_computation_via_redis(args.redis_url.unwrap(), sk.clone()).await {
+        let coordinator = Coordinator::new(sk, tx_res, local_share_db, incoming, outgoing);
+        while let Some(payload) = rx.recv().await {
+            handle(&coordinator,  payload).await;
         }
-        Err(_) => {}
     };
 }
 
@@ -245,8 +239,8 @@ async fn handle_response(results_db: sled::Db, mut rx_res: UnboundedReceiver<Res
 fn main() -> std::io::Result<()> {
     json_env_logger::init();
     let args: Cli = Cli::from_args();
-    let (tx, mut rx) = unbounded_channel::<Payload>();
-    let (tx_res, mut rx_res) = unbounded_channel::<ResponsePayload>();
+    let (tx, rx) = unbounded_channel::<Request>();
+    let (tx_res, rx_res) = unbounded_channel::<ResponsePayload>();
 
     let results_path = args.db_path.join("results");
     let results_db: sled::Db = sled::open(results_path).unwrap();

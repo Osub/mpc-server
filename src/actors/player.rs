@@ -1,21 +1,25 @@
-use std::time::Duration;
 use std::fmt::Debug;
+use std::time::Duration;
+
 use actix::prelude::*;
+use kv_log_macro::debug;
 use round_based::{Msg, StateMachine};
 use serde::Serialize;
 use tokio::time::{self};
+use crate::actors::messages::CoordinatorMessage;
 
-use kv_log_macro::{debug};
 use crate::actors::msg_utils::describe_message;
-use super::messages::{IncomingMessage, MaybeProceed, OutgoingEnvelope, ProtocolError, ProtocolOutput};
+use crate::core::CoreMessage;
 
-pub struct MpcPlayer<I: Send + Clone + Unpin + 'static, SM, M: Send, E: Send, O: Send> {
+use super::messages::{IncomingMessage, MaybeProceed, ProtocolError, ProtocolOutput};
+
+pub(crate) struct MpcPlayer<I: Send + Clone + Unpin + 'static, SM, M: Send + Clone, E: Send, O: Send> {
     input: I,
     room: String,
     index: u16,
     msg_count: u16,
-    coordinator: Recipient<ProtocolError<E, Msg<M>>>,
-    message_broker: Recipient<OutgoingEnvelope>,
+    coordinator: Recipient<ProtocolError<E, IncomingMessage<Msg<M>>>>,
+    message_broker: Recipient<CoordinatorMessage>,
     state: SM,
     deadline: Option<time::Instant>,
     current_round: Option<u16>,
@@ -31,14 +35,14 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         SM::MessageBody: Send + Serialize + Clone,
         SM::Output: Send,
 {
-    pub fn new(
+    pub(crate) fn new(
         input: I,
         room: String,
         index: u16,
         state: SM,
-        coordinator: Recipient<ProtocolError<SM::Err, Msg<SM::MessageBody>>>,
+        coordinator: Recipient<ProtocolError<SM::Err, IncomingMessage<Msg<SM::MessageBody>>>>,
         result_collector: Recipient<ProtocolOutput<I, SM::Output>>,
-        message_broker: Recipient<OutgoingEnvelope>,
+        message_broker: Recipient<CoordinatorMessage>,
     ) -> Self
         where
             SM: StateMachine + Debug + Unpin,
@@ -57,7 +61,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
             message_broker,
         }
     }
-    fn send_error(&mut self, error: SM::Err, message: Msg<SM::MessageBody>) {
+    fn send_error(&mut self, error: SM::Err, message: IncomingMessage<Msg<SM::MessageBody>>) {
         debug!("Sending error");
         let _ = self.coordinator.do_send(ProtocolError { room: self.room.clone(), error, message });
     }
@@ -87,8 +91,8 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         SM::MessageBody: Send + Serialize + Clone,
         SM::Output: Send,
 {
-    fn handle_incoming(&mut self, msg: Msg<SM::MessageBody>) {
-        match self.state.handle_incoming(msg.clone()) {
+    fn handle_incoming(&mut self, msg: IncomingMessage<Msg<SM::MessageBody>>) {
+        match self.state.handle_incoming(msg.message.clone()) {
             Ok(()) => {
                 debug!("Handle Ok", { state: format!("\"{:?}\"", self.state) });
             }
@@ -113,15 +117,11 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         }
 
         for msg in self.state.message_queue().drain(..) {
-            match serde_json::to_string(&msg) {
-                Ok(serialized) => {
-
-                    let _ = self.message_broker.do_send(OutgoingEnvelope {
-                        room: self.room.clone(),
-                        message: serialized,
-                    });
-                }
-                Err(_) => {}
+            if let Ok(serialized) = serde_json::to_string(&msg) {
+                let _ = self.message_broker.do_send(CoordinatorMessage::Outgoing (CoreMessage{
+                    room: self.room.clone(),
+                    message: serialized,
+                }));
             }
         }
     }
@@ -148,10 +148,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         let round_n = self.state.current_round();
         if self.current_round != Some(round_n) {
             self.current_round = Some(round_n);
-            self.deadline = match self.state.round_timeout() {
-                Some(timeout) => Some(time::Instant::now() + timeout),
-                None => None,
-            }
+            self.deadline = self.state.round_timeout().map(|timeout| time::Instant::now() + timeout)
         }
     }
 
@@ -166,7 +163,7 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
         }
         self.send_outgoing(ctx);
         self.refresh_timer();
-        self.finish_if_possible();
+        let _ = self.finish_if_possible();
         Ok(())
     }
 }
@@ -198,12 +195,9 @@ impl<I, SM> Handler<IncomingMessage<Msg<SM::MessageBody>>> for MpcPlayer<I, SM, 
             return;
         }
         self.msg_count += 1;
-        self.handle_incoming(msg.message.clone());
-        match self.maybe_proceed(ctx) {
-            Err(e) => {
-                self.send_error(e, msg.message.clone())
-            }
-            _ => {}
+        self.handle_incoming(msg.clone());
+        if let Err(e) = self.maybe_proceed(ctx) {
+            self.send_error(e, msg.clone())
         }
 
         debug!("Received message", {
@@ -230,9 +224,9 @@ impl<I, SM> Handler<MaybeProceed> for MpcPlayer<I, SM, SM::MessageBody, SM::Err,
     fn handle(&mut self, _: MaybeProceed, ctx: &mut Context<Self>) {
         if self.msg_count == 0 {
             // log::debug!("Try to proceed");
-            self.maybe_proceed(ctx);
+            let _ = self.maybe_proceed(ctx);
             ctx.run_later(Duration::from_millis(250), |_, _ctx| {
-                let _ = _ctx.address().do_send(MaybeProceed {});
+                _ctx.address().do_send(MaybeProceed {});
             });
         } else {
             // log::debug!("Ignore proceed");
