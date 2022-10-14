@@ -16,12 +16,14 @@ pub struct KeygenPayload {
     pub t: u16,
 }
 
+#[allow(non_camel_case_types)]
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum RequestType {
     KEYGEN,
     SIGN,
 }
 
+#[allow(non_camel_case_types)]
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum RequestStatus {
     RECEIVED,

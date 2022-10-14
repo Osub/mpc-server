@@ -4,17 +4,17 @@ use anyhow::{Context, Result};
 
 use crate::core::StoredLocalShare;
 
-pub trait LocalShareStore {
+pub(crate) trait LocalShareStore {
     fn save_local_share(&mut self, local_share: StoredLocalShare) -> Result<()>;
     fn retrieve_local_share(&mut self, public_key: String) -> Result<StoredLocalShare>;
 }
 
-pub struct SledDbLocalShareStore {
+pub(crate) struct SledDbLocalShareStore {
     db: sled::Db,
 }
 
 impl SledDbLocalShareStore {
-    pub fn new(db: sled::Db) -> Self {
+    pub(crate) fn new(db: sled::Db) -> Self {
         Self { db }
     }
 }
