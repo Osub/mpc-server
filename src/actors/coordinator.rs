@@ -1,3 +1,4 @@
+use std::cmp::max;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::pin::Pin;
@@ -277,11 +278,19 @@ impl Coordinator {
     }
 
     fn retry(&mut self, envelope: RetryMessage, ctx: &mut Context<Self>) {
-        if envelope.attempts > 5 {
+        // Every 2, 4, 8, ..., 512 seconds (roughly 10 minutes). (Max 2^9, 9 times)
+        // Then every 10 minutes for 4 hours. (6 * 4 = 24 times)
+        if envelope.attempts > 33 { // About an hour
             prom::COUNTER_MESSAGES_DROPPED.inc();
             log::error!("reached max retries", {room: format!("\"{}\"", &envelope.message.room), protocolMessage: describe_message(&envelope.message.payload)});
         } else {
-            ctx.run_later(Duration::from_secs(2_u32.pow(envelope.attempts as u32) as u64), move |_, _ctx| {
+            let duration = if envelope.attempts <= 9 {
+                Duration::from_secs(2_u64.pow(envelope.attempts as u32))
+            } else {
+                Duration::from_secs(600)
+            };
+            let power2 = max(envelope.attempts as u32, 6);
+            ctx.run_later(duration, move |_, _ctx| {
                 _ctx.notify(CoordinatorMessage::Retry(envelope));
             });
         }
