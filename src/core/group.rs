@@ -32,14 +32,11 @@ pub struct PublicKeyGroup {
 
 impl PublicKeyGroup {
     pub fn new(public_keys: Vec<String>, t: u16, own_public_key: String) -> Self {
-        let mut hasher = Sha256::new();
+        let mut group_id: String = "".to_owned();
+
         for pk in public_keys.iter() {
-            let pk = hex::decode(pk).unwrap();
-            hasher.update(pk.as_slice());
+            group_id.push_str(&pk[2..10]);
         }
-        let hash = hasher.finalize();
-        let hbytes: [u8; 32] = hash.as_slice().try_into().unwrap();
-        let group_id = hex::encode(hbytes);
         Self {
             group_id,
             public_keys,

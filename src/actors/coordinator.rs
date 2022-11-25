@@ -35,6 +35,10 @@ use super::Signer;
 
 #[derive(Debug, Error)]
 enum CoordinatorError {
+    #[error("The group is unknown to this server. This may be caused by delay of local request.")]
+    UnknownGroup,
+    #[error("The message doesn't contain a valid room id.")]
+    InvalidRoom,
     #[error("Public key doesn't belong to the group.")]
     WrongPublicKey,
     #[error("Some of the public keys don't belong to the group.")]
@@ -43,6 +47,8 @@ enum CoordinatorError {
     WrongNumberOfParticipants,
     #[error("The message is not for me.")]
     NotForMe,
+    #[error("The message doesn't contain a valid payload.")]
+    InvalidPayload,
 }
 
 pub struct Coordinator {
@@ -216,15 +222,15 @@ impl Coordinator {
         }
     }
 
-    fn valid_sender_and_receiver(&mut self, msg: WireMessage) -> Result<()> {
-        let group_id = extract_group_id(&msg.room).context("extract group_id")?;
-        let group = self.group_store.retrieve_group(group_id.to_string()).context("Retrieve group.")?;
-        group.get_index(&msg.sender_public_key).map_or(Err(CoordinatorError::WrongPublicKey), |_| Ok(())).context("Validate sender.")?;
-        let m = serde_json::from_str::<GenericProtocolMessage>(&msg.payload).context("parse GenericProtocolMessage")?;
+    fn valid_sender_and_receiver(&mut self, msg: WireMessage) -> Result<(), CoordinatorError> {
+        let group_id = extract_group_id(&msg.room).map_err(|_|{CoordinatorError::InvalidRoom})?;
+        let group = self.group_store.retrieve_group(group_id.to_string()).map_err(|_|{CoordinatorError::UnknownGroup})?;
+        group.get_index(&msg.sender_public_key).map_or(Err(CoordinatorError::WrongPublicKey), |_| Ok(()))?;
+        let m = serde_json::from_str::<GenericProtocolMessage>(&msg.payload).map_err(|_|{CoordinatorError::InvalidPayload})?;
         match m.receiver {
             Some(receiver) => {
                 if receiver != group.get_i() {
-                    return Err(CoordinatorError::NotForMe.into());
+                    return Err(CoordinatorError::NotForMe);
                 }
                 Ok(())
             }
@@ -311,6 +317,11 @@ impl Coordinator {
 
     fn handle_incoming(&mut self, msg: WireMessage, ctx: &mut Context<Self>) {
         prom::COUNTER_MESSAGES_TOTAL_RECEIVED.inc();
+        if !msg.room.contains(&self.pk_str[2..10]){
+            prom::COUNTER_MESSAGES_DROPPED.inc();
+            log::debug!("Dropped foreign group message", {protocolMessage: serde_json::to_string(&msg).unwrap()});
+            return;
+        }
         match self.valid_sender_and_receiver(msg.clone()) {
             Ok(()) => {
                 let mut transformed = msg.clone();
@@ -323,7 +334,11 @@ impl Coordinator {
                     }
                 }
             }
-            Err(_e) => {
+            Err(CoordinatorError::NotForMe) => {
+                prom::COUNTER_MESSAGES_DROPPED.inc();
+                log::debug!("Dropped message addressed to others", {protocolMessage: serde_json::to_string(&msg).unwrap()});
+            }
+            Err(_) => {
                 self.retry(RetryMessage {
                     message: msg,
                     initial_timestamp: utils::current_timestamp(),
