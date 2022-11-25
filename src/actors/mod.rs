@@ -14,7 +14,7 @@ use crate::core::Request;
 
 use kv_log_macro as log;
 use crate::actors::messages::CoordinatorMessage;
-use crate::api::{KeygenPayload, SignPayload};
+
 use crate::prom;
 
 pub async fn handle(coordinator: &Addr<Coordinator>, request: Request) {

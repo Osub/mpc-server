@@ -6,7 +6,7 @@ use anyhow::Result;
 use ecies::{encrypt, decrypt};
 use round_based::Msg;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+
 use thiserror::Error;
 
 pub trait MpcGroup {
