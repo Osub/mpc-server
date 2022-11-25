@@ -280,7 +280,7 @@ impl Coordinator {
     fn retry(&mut self, envelope: RetryMessage, ctx: &mut Context<Self>) {
         // Every 2, 4, 8, ..., 512 seconds (roughly 10 minutes). (Max 2^9, 9 times)
         // Then every 10 minutes for 4 hours. (6 * 4 = 24 times)
-        if envelope.attempts > 33 { // About an hour
+        if envelope.attempts > 33 {
             prom::COUNTER_MESSAGES_DROPPED.inc();
             log::error!("reached max retries", {room: format!("\"{}\"", &envelope.message.room), protocolMessage: describe_message(&envelope.message.payload)});
         } else {
