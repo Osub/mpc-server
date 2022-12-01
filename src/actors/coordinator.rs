@@ -486,8 +486,8 @@ impl Handler<ProtocolOutputO> for Coordinator
     type Result = ();
 
     fn handle(&mut self, msg: ProtocolOutputO, ctx: &mut Context<Self>) {
-        prom::COUNTER_REQUESTS_SIGN_DONE.inc();
-        log::info!("output public key", { room: format!("{:?}", &msg.input.room), publicKey: format!("\"{}\"", hex::encode(msg.output.public_key().to_bytes(true).as_ref()))} );
+        prom::COUNTER_REQUESTS_OFFLINE_DONE.inc();
+        log::info!("offline stage done", { room: format!("{:?}", &msg.input.room) } );
 
         self.offline_state_runners.remove(msg.input.room.as_str());
         let do_it = || -> Result<()>{
@@ -537,6 +537,9 @@ impl Handler<ProtocolOutputS> for Coordinator
     type Result = ();
 
     fn handle(&mut self, msg: ProtocolOutputS, _: &mut Context<Self>) {
+        prom::COUNTER_REQUESTS_SIGN_DONE.inc();
+        log::info!("sign request done", { room: format!("{:?}", &msg.input.room) } );
+
         let r = hex::encode(msg.output.r.to_bytes().as_ref());
         let s = hex::encode(msg.output.s.to_bytes().as_ref());
         let v = hex::encode(msg.output.recid.to_be_bytes().as_ref());

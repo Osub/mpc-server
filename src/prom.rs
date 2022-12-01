@@ -8,6 +8,8 @@ lazy_static! {
         register_int_counter!("requests_sign_received", "Number of sign requests received").unwrap();
     pub static ref COUNTER_REQUESTS_SIGN_HANDLED: IntCounter =
         register_int_counter!("requests_sign_handled", "Number of sign requests handled").unwrap();
+    pub static ref COUNTER_REQUESTS_OFFLINE_DONE: IntCounter =
+        register_int_counter!("requests_offline_done", "Number of sign requests with offline done").unwrap();
     pub static ref COUNTER_REQUESTS_SIGN_DONE: IntCounter =
         register_int_counter!("requests_sign_done", "Number of sign requests done").unwrap();
     pub static ref COUNTER_REQUESTS_KEYGEN_RECEIVED: IntCounter =

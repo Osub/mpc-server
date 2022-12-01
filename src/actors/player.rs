@@ -94,10 +94,17 @@ impl<I, SM> MpcPlayer<I, SM, SM::MessageBody, SM::Err, SM::Output>
     fn handle_incoming(&mut self, msg: IncomingMessage<Msg<SM::MessageBody>>) {
         match self.state.handle_incoming(msg.message.clone()) {
             Ok(()) => {
-                debug!("Handle Ok", { state: format!("\"{:?}\"", self.state) });
+
+                debug!("Handle Ok", {
+                    state: format!("\"{:?}\"", self.state),
+                    room: format!("\"{}\"", &msg.room),
+                });
             }
             Err(e) => {
-                debug!("Handle Err", { state: format!("\"{:?}\"", self.state) });
+                debug!("Handle Err", {
+                    state: format!("\"{:?}\"", self.state),
+                    room: format!("\"{}\"", &msg.room),
+                });
                 self.send_error(e, msg)
             }
         }
