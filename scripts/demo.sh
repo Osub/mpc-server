@@ -4,13 +4,12 @@ realpath() {
 }
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 PROTO_DIR=${SCRIPT_DIR}/../proto
-echo $PROTO_DIR
 export RUST_LOG="debug"
 
 USE_REDIS=$1
 MQ_CONFIG=$([[ ! -z "$USE_REDIS" ]] && echo "-r redis://localhost/" || echo "-m http://127.0.0.1:8000")
 
-echo "Using message queueu $MQ_CONFIG"
+echo "Using message queue $MQ_CONFIG"
 
 NUM_PARTIES=3
 PUBKEYS=("03c20e0c088bb20027a77b1d23ad75058df5349c7a2bfafff7516c44c6f69aa66d" "03d0639e479fa1ca8ee13fd966c216e662408ff00349068bdc9c6966c4ea10fe3e" "0373ee5cd601a19cd9bb95fe7be8b1566b73c51d3e7e375359c129b1d77bb4b3e6")
