@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-
+realpath() {
+    [[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"
+}
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+PROTO_DIR=${SCRIPT_DIR}/../proto
+echo $PROTO_DIR
 export RUST_LOG="debug"
 
 USE_REDIS=$1
@@ -64,46 +68,50 @@ PK1=$(cat tmp/party1/pub.key)
 PK2=$(cat tmp/party2/pub.key)
 PK3=$(cat tmp/party3/pub.key)
 PAYLOAD=$(cat <<-END
-  {"request_id": "001", "public_keys": ["${PK1}", "${PK2}", "${PK3}"], "t": 1}
+  {"request_id": "001", "participant_public_keys": ["${PK1}", "${PK2}", "${PK3}"], "threshold": 1}
 END
 )
 
-curl --silent -X POST http://127.0.0.1:8001/keygen \
-     -H "Content-Type: application/json" \
-     -d "${PAYLOAD}"
-curl --silent -X POST http://127.0.0.1:8002/keygen \
-     -H "Content-Type: application/json" \
-     -d "${PAYLOAD}"
-curl --silent -X POST http://127.0.0.1:8003/keygen \
-     -H "Content-Type: application/json" \
-     -d "${PAYLOAD}"
+grpcurl -plaintext -import-path ${PROTO_DIR} -proto mpc.proto -d "${PAYLOAD}" 127.0.0.1:8001 mpc.Mpc/Keygen
+
+grpcurl -plaintext -import-path ${PROTO_DIR} -proto mpc.proto -d "${PAYLOAD}" 127.0.0.1:8002 mpc.Mpc/Keygen
+
+grpcurl -plaintext -import-path ${PROTO_DIR} -proto mpc.proto -d "${PAYLOAD}" 127.0.0.1:8003 mpc.Mpc/Keygen
 
 echo -e "\nWaiting for Keygen to complete"
 sleep 5
 
 echo "5. Checking Keygen result"
-pubkey=$(curl --silent -X POST http://127.0.0.1:8001/result/001 | grep -o -w -E '[[:alnum:]]{66}')
+PAYLOAD=$(cat <<-END
+  {"request_id": "001"}
+END
+)
+pubkey=$(grpcurl -plaintext -import-path ${PROTO_DIR} -proto mpc.proto -d "${PAYLOAD}" 127.0.0.1:8001 mpc.Mpc/CheckResult | grep -o -w -E '[[:alnum:]]{66}')
 echo "Generated pubkey ${pubkey}"
 
 
 echo "6. Run Sign"
 
 PAYLOAD=$(cat <<-END
-  { "request_id": "sign-001", "message": "7F83B1657FF1FC53B92DC18148A1D65DFC2D4B1FA3D677284ADDD200126D9069", "participant_public_keys": ["${PK2}", "${PK3}"], "public_key": "${pubkey}"}
+  { "request_id": "sign-001", "hash": "7F83B1657FF1FC53B92DC18148A1D65DFC2D4B1FA3D677284ADDD200126D9069", "participant_public_keys": ["${PK2}", "${PK3}"], "public_key": "${pubkey}"}
 END
 )
-curl --silent -X POST http://127.0.0.1:8002/sign \
-     -H "Content-Type: application/json" \
-     -d "${PAYLOAD}"
-curl --silent -X POST http://127.0.0.1:8003/sign \
-     -H "Content-Type: application/json" \
-     -d "${PAYLOAD}"
+
+grpcurl -plaintext -import-path ${PROTO_DIR} -proto mpc.proto -d "${PAYLOAD}" 127.0.0.1:8002 mpc.Mpc/Sign
+
+grpcurl -plaintext -import-path ${PROTO_DIR} -proto mpc.proto -d "${PAYLOAD}" 127.0.0.1:8003 mpc.Mpc/Sign
 
 echo -e "\nWaiting for Sign to complete"
 sleep 5
 
 echo "7. Checking Sign result"
-curl -X POST http://127.0.0.1:8002/result/sign-001
+
+PAYLOAD=$(cat <<-END
+  {"request_id": "sign-001"}
+END
+)
+
+grpcurl -plaintext -import-path ${PROTO_DIR} -proto mpc.proto -d "${PAYLOAD}" 127.0.0.1:8002 mpc.Mpc/CheckResult
 
 echo "\n8. Checking metrics"
-curl -X GET http://127.0.0.1:8002/metrics
+curl -X GET http://127.0.0.1:8102/metrics

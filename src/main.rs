@@ -2,6 +2,8 @@ extern crate base64;
 extern crate json_env_logger;
 
 
+use std::io::{Error, ErrorKind};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use ::redis::Client;
@@ -22,6 +24,8 @@ use crate::actors::{Coordinator, handle};
 use crate::api::{KeygenPayload, RequestStatus, RequestType, ResponsePayload, SignPayload};
 use crate::core::Request;
 use crate::key::decrypt;
+use crate::server::mpc::mpc_server::MpcServer;
+use crate::server::MpcImp;
 use crate::transport::{join_computation_via_messenger, join_computation_via_redis};
 
 mod core;
@@ -35,6 +39,7 @@ pub mod wire;
 mod api;
 mod storage;
 mod crypto;
+mod server;
 
 #[derive(Debug, Error)]
 enum SetupError {
@@ -253,24 +258,70 @@ fn main() -> std::io::Result<()> {
     Arbiter::new().spawn(bootstrap(args.clone(), rx, tx_res.clone()));
     Arbiter::new().spawn(handle_response(results_db.clone(), rx_res));
 
-    let server = move || {
+    let tx0 = tx.clone();
+    let tx_res0 = tx_res.clone();
+    let results_db0=results_db.clone();
+    let args0 = args.clone();
+    let metrics_server = move || {
         HttpServer::new(move || {
             App::new()
                 .app_data(web::Data::new(AppState {
-                    tx: tx.clone(),
-                    tx_res: tx_res.clone(),
-                    results_db: results_db.clone(),
+                    tx: tx0.clone(),
+                    tx_res: tx_res0.clone(),
+                    results_db: results_db0.clone(),
                 }))
                 .wrap(middleware::Logger::default())
-                .route("/keygen", web::post().to(keygen))
-                .route("/sign", web::post().to(sign))
-                .route("/result/{request_id}", web::post().to(result))
                 .route("/metrics", web::get().to(metrics))
         })
-            .bind((args.address, args.port))
+            .bind((args0.address, args0.port+100))
             .unwrap()
             .run()
     };
+    let metrics_server = async {
+        match metrics_server().await{
+            Ok(_) => {
+                Ok(())
+            }
+            Err(_) => {
+                Err(Error::new(ErrorKind::Other, "failed to run"))
+            }
+        }
+    };
 
-    sys.block_on(server())
+    let mpc_server = move || {
+
+        let mpcServer = MpcImp::new(tx.clone(), tx_res.clone(), results_db.clone());
+        let addr = format!("{}:{}", args.address, args.port).parse().unwrap();
+        tonic::transport::Server::builder()
+            .add_service(MpcServer::new(mpcServer))
+            .serve(addr)
+    };
+    let mpc_server = async {
+        match mpc_server().await {
+            Ok(_) => {
+                Ok(())
+            }
+            Err(_) => {
+                Err(Error::new(ErrorKind::Other, "failed to run"))
+            }
+        }
+    };
+    let combined = || async{
+        let res = futures::future::join(
+        metrics_server, mpc_server
+    ).await;
+        match res {
+            (Ok(_), Ok(_)) => {
+                Ok(())
+            }
+            (_, Err(e))=> {
+                Err(e)
+            }
+            (Err(e), _) => {
+                Err(e)
+            }
+        }
+    };
+
+    sys.block_on(combined())
 }

@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package mpc;
+
+option go_package = "github.com/avalido/mpc-controller/mpcclient";
+
+// Mpc defines the MPC API from server.
+service Mpc {
+  // Keygen defines a rpc handler method for MsgTransfer.
+  rpc Keygen(KeygenRequest) returns (KeygenResponse);
+  rpc Sign(SignRequest) returns (SignResponse);
+  rpc CheckResult(CheckResultRequest) returns (CheckResultResponse);
+}
+
+message KeygenRequest {
+  string request_id = 1;
+  repeated string participant_public_keys = 2;
+  uint32 threshold = 3;
+}
+
+message KeygenResponse {
+  string request_id = 1;
+}
+
+message SignRequest {
+  string request_id = 1;
+  repeated string participant_public_keys = 2;
+  string public_key = 3;
+  string hash = 4;
+}
+
+message SignResponse {
+  string request_id = 1;
+}
+
+message CheckResultRequest {
+  string request_id = 1;
+}
+
+message CheckResultResponse{
+  enum REQUEST_TYPE{
+    UNKNOWN_TYPE = 0;
+    KEYGEN = 1;
+    SIGN = 2;
+  }
+  enum REQUEST_STATUS{
+    UNKNOWN_STATUS = 0;
+    RECEIVED = 1;
+    PROCESSING = 2;
+    DONE = 3;
+  }
+  string request_id = 1;
+  string result = 2;
+  REQUEST_TYPE request_type = 3;
+  REQUEST_STATUS request_status = 4;
+}
