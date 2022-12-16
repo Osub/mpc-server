@@ -50,11 +50,7 @@ enum SetupError {
     MultipleMessageQueueConfigured,
 }
 
-struct AppState {
-    tx: UnboundedSender<Request>,
-    tx_res: UnboundedSender<ResponsePayload>,
-    results_db: sled::Db,
-}
+struct AppState {}
 
 fn save_result(db: &sled::Db, response: ResponsePayload) -> Result<()> {
     let key = response.request_id.clone();
@@ -86,75 +82,6 @@ async fn metrics() -> impl Responder {
         Err(_) => {
             HttpResponse::InternalServerError().body("Failed to encode metrics.")
         }
-    }
-}
-
-async fn keygen(data: web::Data<AppState>, req: web::Json<KeygenPayload>) -> impl Responder {
-    let exists_already = data.results_db.contains_key(req.request_id.as_bytes()).map_or(false, |x| x);
-    if exists_already {
-        return HttpResponse::BadRequest().body(format!("A request of id \"{}\" already exists.", req.request_id));
-    }
-    let _ = data.tx_res.send(ResponsePayload {
-        request_id: req.0.request_id.clone(),
-        result: None,
-        request_type: RequestType::KEYGEN,
-        request_status: RequestStatus::RECEIVED,
-    });
-    match data.tx.send(Request::Keygen(req.0)) {
-        Ok(_) => {
-            HttpResponse::Ok().body("Request received!")
-        }
-        Err(_) => {
-            HttpResponse::InternalServerError().body("Failed to queue the request.")
-        }
-    }
-}
-
-async fn sign(data: web::Data<AppState>, req: web::Json<SignPayload>) -> impl Responder {
-    let exists_already = data.results_db.contains_key(req.request_id.as_bytes()).map_or(false, |x| x);
-    if exists_already {
-        return HttpResponse::BadRequest().body(format!("A request of id \"{}\" already exists.", req.request_id));
-    }
-    match BigInt::from_hex(req.message.as_str()) {
-        Ok(_) => {
-            let _ = data.tx_res.send(ResponsePayload {
-                request_id: req.0.request_id.clone(),
-                result: None,
-                request_type: RequestType::SIGN,
-                request_status: RequestStatus::RECEIVED,
-            });
-            match data.tx.send(Request::Sign(req.0)) {
-                Ok(_) => {
-                    HttpResponse::Ok().body("Request received!")
-                }
-                Err(_) => {
-                    HttpResponse::InternalServerError().body("Failed to queue the request.")
-                }
-            }
-        }
-        Err(_) => {
-            HttpResponse::BadRequest().body("Message is not a valid hash.")
-        }
-    }
-}
-
-async fn result(data: web::Data<AppState>, request_id: web::Path<String>) -> impl Responder {
-    let request_id = request_id.into_inner();
-    let response = data.results_db.get(request_id.as_bytes());
-    let not_found = "{\"error\": \"Not found\"}";
-    let not_found = HttpResponse::NotFound().content_type("application/json").body(not_found);
-    if response.is_err() {
-        return not_found;
-    }
-    if response.as_ref().unwrap().is_none() {
-        return not_found;
-    }
-    let response = response.unwrap().unwrap();
-    let response = String::from_utf8(response.to_vec());
-
-    match response {
-        Ok(r) => { HttpResponse::Ok().content_type("application/json").body(r) }
-        Err(_) => not_found
     }
 }
 
@@ -258,18 +185,11 @@ fn main() -> std::io::Result<()> {
     Arbiter::new().spawn(bootstrap(args.clone(), rx, tx_res.clone()));
     Arbiter::new().spawn(handle_response(results_db.clone(), rx_res));
 
-    let tx0 = tx.clone();
-    let tx_res0 = tx_res.clone();
-    let results_db0=results_db.clone();
     let args0 = args.clone();
     let metrics_server = move || {
         HttpServer::new(move || {
             App::new()
-                .app_data(web::Data::new(AppState {
-                    tx: tx0.clone(),
-                    tx_res: tx_res0.clone(),
-                    results_db: results_db0.clone(),
-                }))
+                .app_data(web::Data::new(AppState {}))
                 .wrap(middleware::Logger::default())
                 .route("/metrics", web::get().to(metrics))
         })
