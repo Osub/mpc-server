@@ -157,7 +157,7 @@ async fn use_redis(args: Cli, mut rx: UnboundedReceiver<Request>, tx_res: Unboun
     if let Ok((incoming, outgoing)) = join_computation_via_redis(args.redis_url.unwrap(), sk.clone()).await {
         let coordinator = Coordinator::new(sk, tx_res, local_share_db, incoming, outgoing);
         while let Some(payload) = rx.recv().await {
-            handle(&coordinator,  payload).await;
+            handle(&coordinator, payload).await;
         }
     };
 }
@@ -193,52 +193,30 @@ fn main() -> std::io::Result<()> {
                 .wrap(middleware::Logger::default())
                 .route("/metrics", web::get().to(metrics))
         })
-            .bind((args0.address, args0.port+100))
+            .bind((args0.address, args0.port + 100))
             .unwrap()
             .run()
     };
-    let metrics_server = async {
-        match metrics_server().await{
-            Ok(_) => {
-                Ok(())
-            }
-            Err(_) => {
-                Err(Error::new(ErrorKind::Other, "failed to run"))
-            }
-        }
-    };
-
     let mpc_server = move || {
-
         let mpcServer = MpcImp::new(tx.clone(), tx_res.clone(), results_db.clone());
         let addr = format!("{}:{}", args.address, args.port).parse().unwrap();
         tonic::transport::Server::builder()
             .add_service(MpcServer::new(mpcServer))
             .serve(addr)
     };
-    let mpc_server = async {
-        match mpc_server().await {
-            Ok(_) => {
-                Ok(())
-            }
-            Err(_) => {
-                Err(Error::new(ErrorKind::Other, "failed to run"))
-            }
-        }
-    };
-    let combined = || async{
+    let combined = || async {
         let res = futures::future::join(
-        metrics_server, mpc_server
-    ).await;
+            metrics_server(), mpc_server(),
+        ).await;
         match res {
             (Ok(_), Ok(_)) => {
                 Ok(())
             }
-            (_, Err(e))=> {
-                Err(e)
+            (_, Err(_)) => {
+                Err(Error::new(ErrorKind::Other, "MPC server error"))
             }
-            (Err(e), _) => {
-                Err(e)
+            (Err(_), _) => {
+                Err(Error::new(ErrorKind::Other, "Metrics server error"))
             }
         }
     };
