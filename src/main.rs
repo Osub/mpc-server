@@ -1,8 +1,6 @@
 extern crate base64;
 extern crate json_env_logger;
 
-
-use std::io::{Error, ErrorKind};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
@@ -40,6 +38,15 @@ mod api;
 mod storage;
 mod crypto;
 mod server;
+
+#[derive(Debug, Error)]
+enum AppError {
+    #[error("Metrics server error.")]
+    MetricsServerError,
+
+    #[error("Mpc server error.")]
+    MpcServerError,
+}
 
 #[derive(Debug, Error)]
 enum SetupError {
@@ -168,7 +175,7 @@ async fn handle_response(results_db: sled::Db, mut rx_res: UnboundedReceiver<Res
     }
 }
 
-fn main() -> std::io::Result<()> {
+fn main() -> Result<(), AppError> {
     json_env_logger::init();
     let args: Cli = Cli::from_args();
     let (tx, rx) = unbounded_channel::<Request>();
@@ -213,10 +220,10 @@ fn main() -> std::io::Result<()> {
                 Ok(())
             }
             (_, Err(_)) => {
-                Err(Error::new(ErrorKind::Other, "MPC server error"))
+                Err(AppError::MpcServerError)
             }
             (Err(_), _) => {
-                Err(Error::new(ErrorKind::Other, "Metrics server error"))
+                Err(AppError::MetricsServerError)
             }
         }
     };
