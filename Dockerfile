@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
-FROM rust:alpine3.16 as build
+FROM rust:1.63 as build
 WORKDIR /go/src/github.com/avalido/mpc-server/
 COPY . .
-RUN apk update && apk add protoc
+RUN apt-get install -y protobuf-compiler
 RUN cargo build --release
 RUN cd ./messenger && cargo build --release
 
