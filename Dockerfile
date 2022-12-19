@@ -2,7 +2,7 @@
 FROM rust:alpine3.16 as build
 WORKDIR /go/src/github.com/avalido/mpc-server/
 COPY . .
-RUN apt install -y protobuf-compiler
+RUN apk update && apk add protoc
 RUN cargo build --release
 RUN cd ./messenger && cargo build --release
 
