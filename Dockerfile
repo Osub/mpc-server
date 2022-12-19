@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM rust:1.63 as build
+FROM rust:alpine3.16 as build
 WORKDIR /go/src/github.com/avalido/mpc-server/
 COPY . .
 RUN apt install -y protobuf-compiler
