@@ -37,7 +37,10 @@ start_mpc_server(){
 }
 
 # 0. Clean up
-pkill -f mpc-server
+for p in $( ps ax | grep mpc-server | awk '{print $1;}' ); do
+  kill -9 $p
+done
+
 pkill -f messenger
 rm -rf tmp
 
