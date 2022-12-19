@@ -2,7 +2,6 @@
 FROM rust:1.63 as build
 WORKDIR /go/src/github.com/avalido/mpc-server/
 COPY . .
-RUN apt-get install -y protobuf-compiler
 RUN curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-linux-x86_64.zip
 RUN unzip protoc-3.15.8-linux-x86_64.zip -d $HOME/.local
 ENV PATH="$PATH:$HOME/.local/bin"
