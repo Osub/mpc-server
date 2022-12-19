@@ -2,6 +2,7 @@
 FROM rust:1.63 as build
 WORKDIR /go/src/github.com/avalido/mpc-server/
 COPY . .
+RUN apt install -y protobuf-compiler
 RUN cargo build --release
 RUN cd ./messenger && cargo build --release
 
