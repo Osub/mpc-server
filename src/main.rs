@@ -19,10 +19,11 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use cli::Cli;
 
 use crate::actors::{Coordinator, handle};
-use crate::api::{KeygenPayload, RequestStatus, RequestType, ResponsePayload, SignPayload};
-use crate::core::Request;
+use crate::api::{RequestStatus, RequestType, ResponsePayload};
+use crate::pb::types::request::Request;
 use crate::key::decrypt;
-use crate::server::mpc::mpc_server::MpcServer;
+use crate::pb::mpc::CheckResultResponse;
+use crate::pb::mpc::mpc_server::MpcServer;
 use crate::server::MpcImp;
 use crate::transport::{join_computation_via_messenger, join_computation_via_redis};
 
@@ -38,6 +39,7 @@ mod api;
 mod storage;
 mod crypto;
 mod server;
+mod pb;
 
 #[derive(Debug, Error)]
 enum AppError {
@@ -59,7 +61,7 @@ enum SetupError {
 
 struct AppState {}
 
-fn save_result(db: &sled::Db, response: ResponsePayload) -> Result<()> {
+fn save_result(db: &sled::Db, response: CheckResultResponse) -> Result<()> {
     let key = response.request_id.clone();
     let value = serde_json::to_vec_pretty(&response)?;
     db.insert(
@@ -127,7 +129,7 @@ async fn precheck(args: Cli) -> Result<()> {
     }
 }
 
-async fn bootstrap(args: Cli, rx: UnboundedReceiver<Request>, tx_res: UnboundedSender<ResponsePayload>) {
+async fn bootstrap(args: Cli, rx: UnboundedReceiver<Request>, tx_res: UnboundedSender<CheckResultResponse>) {
     let args0 = args.clone();
     match (args0.messenger_address, args0.redis_url) {
         (Some(_), None) => {
@@ -142,21 +144,21 @@ async fn bootstrap(args: Cli, rx: UnboundedReceiver<Request>, tx_res: UnboundedS
     }
 }
 
-async fn use_messenger(args: Cli, mut rx: UnboundedReceiver<Request>, tx_res: UnboundedSender<ResponsePayload>) {
+async fn use_messenger(args: Cli, mut rx: UnboundedReceiver<Request>, tx_res: UnboundedSender<CheckResultResponse>) {
     let (sk, _) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't get secret key.").unwrap();
     let local_shares_path = args.db_path.join("local_shares");
     let local_share_db: sled::Db = sled::open(local_shares_path).unwrap();
 
     if let Ok((incoming, outgoing)) = join_computation_via_messenger(args.messenger_address.unwrap(), sk.clone()).await {
         let coordinator = Coordinator::new(sk, tx_res, local_share_db, incoming, outgoing);
-        while let Some(payload) = rx.recv().await {
-            handle(&coordinator, payload).await;
+        while let Some(req) = rx.recv().await {
+            handle(&coordinator, req).await;
         }
     };
 }
 
 
-async fn use_redis(args: Cli, mut rx: UnboundedReceiver<Request>, tx_res: UnboundedSender<ResponsePayload>) {
+async fn use_redis(args: Cli, mut rx: UnboundedReceiver<Request>, tx_res: UnboundedSender<CheckResultResponse>) {
     let (sk, _) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't get secret key.").unwrap();
     let local_shares_path = args.db_path.join("local_shares");
     let local_share_db: sled::Db = sled::open(local_shares_path).unwrap();
@@ -169,7 +171,7 @@ async fn use_redis(args: Cli, mut rx: UnboundedReceiver<Request>, tx_res: Unboun
     };
 }
 
-async fn handle_response(results_db: sled::Db, mut rx_res: UnboundedReceiver<ResponsePayload>) {
+async fn handle_response(results_db: sled::Db, mut rx_res: UnboundedReceiver<CheckResultResponse>) {
     while let Some(response) = rx_res.recv().await {
         let _ = save_result(&results_db, response);
     }
@@ -179,7 +181,7 @@ fn main() -> Result<(), AppError> {
     json_env_logger::init();
     let args: Cli = Cli::from_args();
     let (tx, rx) = unbounded_channel::<Request>();
-    let (tx_res, rx_res) = unbounded_channel::<ResponsePayload>();
+    let (tx_res, rx_res) = unbounded_channel::<CheckResultResponse>();
 
     let results_path = args.db_path.join("results");
     let results_db: sled::Db = sled::open(results_path).unwrap();

@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package types;
+
+import "mpc.proto";
+
+message Request {
+  oneof request {
+    mpc.KeygenRequest keygen = 1;
+    mpc.SignRequest sign = 2;
+  }
+}
