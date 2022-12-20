@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use anyhow::{Result};
 use serde_json::value::RawValue;
-use crate::core::CoreMessage;
-use crate::pb::types::WireMessage;
+use crate::pb::types::{WireMessage, CoreMessage};
 use crate::pb::mpc;
 
 #[derive(Message)]

@@ -18,3 +18,7 @@ message WireMessage {
   string signature = 4;
 }
 
+message CoreMessage {
+  string room = 1;
+  string message = 2;
+}

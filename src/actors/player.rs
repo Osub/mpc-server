@@ -9,7 +9,7 @@ use tokio::time::{self};
 use crate::actors::messages::CoordinatorMessage;
 
 use crate::actors::msg_utils::describe_message;
-use crate::core::CoreMessage;
+use crate::pb::types::CoreMessage;
 
 use super::messages::{IncomingMessage, MaybeProceed, ProtocolError, ProtocolOutput};
 

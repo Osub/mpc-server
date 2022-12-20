@@ -7,7 +7,7 @@ use round_based::Msg;
 use crate::actors::messages::CoordinatorMessage;
 
 use crate::actors::types::SignTask;
-use crate::core::CoreMessage;
+use crate::pb::types::CoreMessage;
 
 use super::messages::{IncomingMessage, ProtocolOutput};
 
