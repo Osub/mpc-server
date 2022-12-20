@@ -19,7 +19,6 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use cli::Cli;
 
 use crate::actors::{Coordinator, handle};
-use crate::api::{RequestType};
 use crate::pb::types::request::Request;
 use crate::key::decrypt;
 use crate::pb::mpc::CheckResultResponse;
@@ -34,8 +33,6 @@ mod transport;
 mod key;
 mod prom;
 mod utils;
-pub mod wire;
-mod api;
 mod storage;
 mod crypto;
 mod server;
