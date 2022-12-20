@@ -103,6 +103,7 @@ pub mod check_result_response {
         Received = 1,
         Processing = 2,
         Done = 3,
+        Error = 4,
     }
     impl RequestStatus {
         /// String value of the enum field names used in the ProtoBuf definition.
@@ -115,6 +116,7 @@ pub mod check_result_response {
                 RequestStatus::Received => "RECEIVED",
                 RequestStatus::Processing => "PROCESSING",
                 RequestStatus::Done => "DONE",
+                RequestStatus::Error => "ERROR",
             }
         }
     }
