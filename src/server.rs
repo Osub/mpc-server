@@ -1,6 +1,6 @@
 pub mod mpc {
-    // include!(concat!(env!("OUT_DIR"), "/mpc.rs"));
-    tonic::include_proto!("mpc");
+    include!("generated.rs");
+    // tonic::include_proto!("mpc");
 }
 
 use curv::arithmetic::Converter;
