@@ -18,11 +18,11 @@ use secp256k1::{PublicKey, SecretKey};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{CheckResultResponse, prom, RequestType};
+use crate::{CheckResultResponse, prom};
 use crate::actors::aliases::*;
 use crate::actors::msg_utils::describe_message;
 use crate::actors::types::{EnrichedSignRequest, SignTask};
-use crate::api::{RequestStatus, ResponsePayload};
+
 use crate::core::{MpcGroup, PublicKeyGroup, StoredLocalShare};
 use crate::crypto::{Decrypter, Encrypter, SimpleDecrypter, SimpleEncrypter};
 use crate::pb::mpc;
@@ -291,7 +291,7 @@ impl Coordinator {
             } else {
                 Duration::from_secs(600)
             };
-            let power2 = max(envelope.attempts as u32, 6);
+            let _power2 = max(envelope.attempts as u32, 6);
             ctx.run_later(duration, move |_, _ctx| {
                 _ctx.notify(CoordinatorMessage::Retry(envelope));
             });

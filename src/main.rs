@@ -1,15 +1,15 @@
 extern crate base64;
 extern crate json_env_logger;
 
-use std::net::SocketAddr;
+
 use std::path::PathBuf;
 
 use ::redis::Client;
 use actix::prelude::*;
 use actix_web::{App, HttpResponse, HttpServer, middleware, Responder, web};
 use anyhow::{Context, Result};
-use curv::arithmetic::Converter;
-use curv::BigInt;
+
+
 use prometheus::{Encoder, TextEncoder};
 use secp256k1::{PublicKey, SecretKey};
 use structopt::StructOpt;
@@ -19,7 +19,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use cli::Cli;
 
 use crate::actors::{Coordinator, handle};
-use crate::api::{RequestStatus, RequestType, ResponsePayload};
+use crate::api::{RequestType};
 use crate::pb::types::request::Request;
 use crate::key::decrypt;
 use crate::pb::mpc::CheckResultResponse;
