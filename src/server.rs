@@ -1,27 +1,28 @@
-pub mod mpc {
-    include!("generated.rs");
-    // tonic::include_proto!("mpc");
-}
+// pub mod mpc {
+//     include!("generated.rs");
+//     // tonic::include_proto!("mpc");
+// }
 
 use curv::arithmetic::Converter;
 use curv::BigInt;
 use tokio::sync::mpsc::UnboundedSender;
 use tonic::{Response, Status};
-use mpc::mpc_server::Mpc;
-use mpc::{KeygenRequest, KeygenResponse, SignRequest, SignResponse, CheckResultRequest, CheckResultResponse};
-use crate::{KeygenPayload, Request, RequestStatus, RequestType, ResponsePayload, SignPayload};
-use crate::server::mpc::check_result_response;
+use crate::pb::mpc::mpc_server::Mpc;
+use crate::pb::mpc::{KeygenRequest, KeygenResponse, SignRequest, SignResponse, CheckResultRequest, CheckResultResponse};
+// use crate::{KeygenPayload, Request, RequestStatus, RequestType, ResponsePayload, SignPayload};
+use crate::pb::mpc::check_result_response;
+use crate::pb::types::request::Request;
 
 #[derive(Debug)]
 pub struct MpcImp {
     tx: UnboundedSender<Request>,
-    tx_res: UnboundedSender<ResponsePayload>,
+    tx_res: UnboundedSender<CheckResultResponse>,
     results_db: sled::Db,
 }
 
 impl MpcImp {
     pub(crate) fn new(tx: UnboundedSender<Request>,
-           tx_res: UnboundedSender<ResponsePayload>,
+           tx_res: UnboundedSender<CheckResultResponse>,
            results_db: sled::Db) -> Self {
         return Self {
             tx,
@@ -42,22 +43,16 @@ impl Mpc for MpcImp {
         if already_exists {
             return Err(Status::already_exists(format!("A request of id \"{}\" already exists.", request.get_ref().request_id)));
         }
-        let _ = self.tx_res.send(ResponsePayload {
-            request_id: request.get_ref().request_id.clone(),
-            result: None,
-            request_type: RequestType::KEYGEN,
-            request_status: RequestStatus::RECEIVED,
+        let request_id = request.get_ref().request_id.clone();
+        let _ = self.tx_res.send(CheckResultResponse {
+            request_id: request_id.clone(),
+            result: "".to_owned(),
+            request_type: check_result_response::RequestType::Keygen as i32,
+            request_status: check_result_response::RequestStatus::Received as i32,
         });
-        let payload = KeygenPayload {
-            request_id: request.get_ref().request_id.clone(),
-            public_keys: request.get_ref().participant_public_keys.clone(),
-            t: request.get_ref().threshold as u16,
-        };
-        match self.tx.send(Request::Keygen(payload)) {
+        match self.tx.send(Request::Keygen(request.into_inner())) {
             Ok(_) => {
-                let resp = KeygenResponse {
-                    request_id: request.get_ref().request_id.clone()
-                };
+                let resp = KeygenResponse { request_id };
                 Ok(Response::new(resp))
             }
             Err(_) => {
@@ -73,24 +68,17 @@ impl Mpc for MpcImp {
         }
         match BigInt::from_hex(&*request.get_ref().hash) {
             Ok(_) => {
-                let _ = self.tx_res.send(ResponsePayload {
-                    request_id: request.get_ref().request_id.clone(),
-                    result: None,
-                    request_type: RequestType::SIGN,
-                    request_status: RequestStatus::RECEIVED,
+
+                let request_id = request.get_ref().request_id.clone();
+                let _ = self.tx_res.send(CheckResultResponse {
+                    request_id: request_id.clone(),
+                    result: "".to_owned(),
+                    request_type: check_result_response::RequestType::Sign as i32,
+                    request_status: check_result_response::RequestStatus::Received as i32,
                 });
-                let payload = SignPayload {
-                    request_id: request.get_ref().request_id.clone(),
-                    public_key: request.get_ref().public_key.clone(),
-                    participant_public_keys: request.get_ref().participant_public_keys.clone(),
-                    message: request.get_ref().hash.clone(),
-                };
-                match self.tx.send(Request::Sign(payload)) {
+                match self.tx.send(Request::Sign(request.into_inner())) {
                     Ok(_) => {
-                        let resp = SignResponse {
-                            request_id: request.get_ref().request_id.clone()
-                        };
-                        Ok(Response::new(resp))
+                        Ok(Response::new(SignResponse {request_id}))
                     }
                     Err(_) => {
                         Err(Status::internal("Failed to queue the request."))
@@ -116,42 +104,11 @@ impl Mpc for MpcImp {
         }
         let response = response.unwrap().unwrap();
         // let response = String::from_utf8(response.to_vec());
-        let response = serde_json::from_slice::<ResponsePayload>(&*response);
+        let response = serde_json::from_slice::<CheckResultResponse>(&*response);
 
         match response {
             Ok(r) => {
-                let req_type = match r.request_type {
-                    RequestType::KEYGEN => {
-                        check_result_response::RequestType::Keygen as i32
-                    }
-                    RequestType::SIGN => {
-                        check_result_response::RequestType::Sign as i32
-                    }
-                };
-                let req_stat = match r.request_status {
-                    RequestStatus::RECEIVED => {
-                        check_result_response::RequestStatus::Received as i32
-                    }
-                    RequestStatus::PROCESSING => {
-                        check_result_response::RequestStatus::Processing as i32
-                    }
-                    RequestStatus::OFFLINE_STAGE_DONE => {
-                        check_result_response::RequestStatus::Processing as i32
-                    }
-                    RequestStatus::DONE => {
-                        check_result_response::RequestStatus::Done as i32
-                    }
-                    RequestStatus::ERROR => {
-                        check_result_response::RequestStatus::Done as i32
-                    }
-                };
-                let resp = CheckResultResponse {
-                    request_id: r.request_id,
-                    result: r.result.unwrap_or("".to_owned()),
-                    request_type: req_type,
-                    request_status: req_stat,
-                };
-                Ok(Response::new(resp))
+                Ok(Response::new(r))
             }
             Err(_) => not_found
         }

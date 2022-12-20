@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use secp256k1::SecretKey;
 use crate::actors::messages::{Encrypted, GenericProtocolMessage};
 use crate::core::PublicKeyGroup;
-use crate::wire::WireMessage;
+use crate::pb::types::WireMessage;
 
 pub(crate) trait Decrypter {
     fn maybe_decrypt(&mut self, msg: &mut WireMessage) -> Result<()>;

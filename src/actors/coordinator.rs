@@ -18,17 +18,19 @@ use secp256k1::{PublicKey, SecretKey};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{KeygenPayload, prom, RequestType, SignPayload};
+use crate::{CheckResultResponse, prom};
 use crate::actors::aliases::*;
 use crate::actors::msg_utils::describe_message;
 use crate::actors::types::{EnrichedSignRequest, SignTask};
-use crate::api::{RequestStatus, ResponsePayload};
-use crate::core::{CoreMessage, MpcGroup, PublicKeyGroup, StoredLocalShare};
+
+use crate::core::{MpcGroup, PublicKeyGroup, StoredLocalShare};
 use crate::crypto::{Decrypter, Encrypter, SimpleDecrypter, SimpleEncrypter};
+use crate::pb::mpc;
+use crate::pb::mpc::{KeygenRequest, SignRequest};
 use crate::storage::{GroupStore, LocalShareStore, SledDbGroupStore, SledDbLocalShareStore};
 use crate::utils;
 use crate::utils::{extract_group_id, make_room_id};
-use crate::wire::WireMessage;
+use crate::pb::types::{WireMessage, CoreMessage};
 
 use super::messages::*;
 use super::MpcPlayer;
@@ -54,7 +56,7 @@ enum CoordinatorError {
 
 pub struct Coordinator {
     pk_str: String,
-    tx_res: UnboundedSender<ResponsePayload>,
+    tx_res: UnboundedSender<CheckResultResponse>,
     group_store: Box<dyn GroupStore>,
     local_share_store: Box<dyn LocalShareStore>,
     encrypter: Box<dyn Encrypter>,
@@ -66,7 +68,7 @@ pub struct Coordinator {
 }
 
 impl Coordinator {
-    pub fn new<Si, St>(sk: SecretKey, tx_res: UnboundedSender<ResponsePayload>, db: sled::Db, stream: St, sink: Si) -> Addr<Self>
+    pub fn new<Si, St>(sk: SecretKey, tx_res: UnboundedSender<CheckResultResponse>, db: sled::Db, stream: St, sink: Si) -> Addr<Self>
         where
             St: Stream<Item=Result<WireMessage>> + 'static,
             Si: Sink<CoreMessage, Error=anyhow::Error> + 'static,
@@ -98,17 +100,17 @@ impl Coordinator {
         })
     }
 
-    fn handle_keygen_request(&mut self, req: KeygenPayload, ctx: &mut Context<Self>) -> Result<()> {
+    fn handle_keygen_request(&mut self, req: KeygenRequest, ctx: &mut Context<Self>) -> Result<()> {
         log::info!("Handling request", {request: serde_json::to_string(&req).unwrap_or("".to_string())});
         prom::COUNTER_REQUESTS_KEYGEN_HANDLED.inc();
-        let KeygenPayload { request_id, public_keys, t } = req.clone();
-        let _ = self.tx_res.send(ResponsePayload {
+        let KeygenRequest { request_id, participant_public_keys, threshold, .. } = req.clone();
+        let _ = self.tx_res.send(CheckResultResponse {
             request_id,
-            result: None,
-            request_type: RequestType::KEYGEN,
-            request_status: RequestStatus::PROCESSING,
+            result: "".to_owned(),
+            request_type: mpc::check_result_response::RequestType::Keygen as i32,
+            request_status: mpc::check_result_response::RequestStatus::Processing as i32,
         });
-        let group = PublicKeyGroup::new(public_keys, t, self.pk_str.clone());
+        let group = PublicKeyGroup::new(participant_public_keys, threshold as u16, self.pk_str.clone());
         let group_id = group.get_group_id();
         let room = make_room_id(req.request_id.as_str(), group_id.as_str());
 
@@ -127,7 +129,7 @@ impl Coordinator {
         Ok(())
     }
 
-    fn handle_sign_request(&mut self, req: SignPayload, ctx: &mut Context<Self>) -> Result<()> {
+    fn handle_sign_request(&mut self, req: SignRequest, ctx: &mut Context<Self>) -> Result<()> {
         log::info!("Handling request", {request: serde_json::to_string(&req).unwrap_or("".to_string())});
         prom::COUNTER_REQUESTS_SIGN_HANDLED.inc();
         let local_share = self.local_share_store.retrieve_local_share(req.public_key.clone()).context("Retrieve local share.")?;
@@ -156,11 +158,11 @@ impl Coordinator {
             Ok(indices.into_iter().map(|o| o.expect("Index") as u16).collect())
         }.context("Find index of participants")?;
 
-        let _ = self.tx_res.send(ResponsePayload {
+        let _ = self.tx_res.send(CheckResultResponse {
             request_id: req.request_id.clone(),
-            result: None,
-            request_type: RequestType::SIGN,
-            request_status: RequestStatus::PROCESSING,
+            result: "".to_owned(),
+            request_type: mpc::check_result_response::RequestType::Sign as i32,
+            request_status: mpc::check_result_response::RequestStatus::Processing as i32,
         });
         let _index_in_group = group.get_i();
         let index_in_s_l = subgroup.get_i();
@@ -289,7 +291,7 @@ impl Coordinator {
             } else {
                 Duration::from_secs(600)
             };
-            let power2 = max(envelope.attempts as u32, 6);
+            let _power2 = max(envelope.attempts as u32, 6);
             ctx.run_later(duration, move |_, _ctx| {
                 _ctx.notify(CoordinatorMessage::Retry(envelope));
             });
@@ -443,8 +445,8 @@ impl Handler<ProtocolOutputKG> for Coordinator
     fn handle(&mut self, msg: ProtocolOutputKG, _: &mut Context<Self>) {
         prom::COUNTER_REQUESTS_KEYGEN_DONE.inc();
         let group = PublicKeyGroup::new(
-            msg.input.public_keys.clone(),
-            msg.input.t,
+            msg.input.participant_public_keys.clone(),
+            msg.input.threshold as u16,
             self.pk_str.clone(),
         );
 
@@ -458,16 +460,16 @@ impl Handler<ProtocolOutputKG> for Coordinator
         let _share = msg.output.clone();
         let request_id = msg.input.request_id.clone();
         let saved = self.local_share_store.save_local_share(StoredLocalShare {
-            public_keys: msg.input.public_keys,
+            public_keys: msg.input.participant_public_keys,
             own_public_key: self.pk_str.clone(),
             share: msg.output,
         });
 
-        let _ = self.tx_res.send(ResponsePayload {
+        let _ = self.tx_res.send(CheckResultResponse {
             request_id,
-            result: Some(sum_pk),
-            request_type: RequestType::KEYGEN,
-            request_status: RequestStatus::DONE,
+            result: sum_pk,
+            request_type: mpc::check_result_response::RequestType::Keygen as i32,
+            request_status: mpc::check_result_response::RequestStatus::Done as i32,
         });
 
         match saved {
@@ -491,7 +493,7 @@ impl Handler<ProtocolOutputO> for Coordinator
 
         self.offline_state_runners.remove(msg.input.room.as_str());
         let do_it = || -> Result<()>{
-            let message = BigInt::from_hex(msg.input.inner.message.as_ref())?;
+            let message = BigInt::from_hex(msg.input.inner.hash.as_ref())?;
             let completed_offline_stage = msg.output;
             let input = msg.input.clone();
             let task = SignTask {
@@ -509,11 +511,11 @@ impl Handler<ProtocolOutputO> for Coordinator
             ).start();
             self.signers.insert(msg.input.room.to_owned(), signer);
             let request_id = msg.input.inner.request_id.clone();
-            let _ = self.tx_res.send(ResponsePayload {
+            let _ = self.tx_res.send(CheckResultResponse {
                 request_id,
-                result: None,
-                request_type: RequestType::SIGN,
-                request_status: RequestStatus::OFFLINE_STAGE_DONE,
+                result: "".to_owned(),
+                request_type: mpc::check_result_response::RequestType::Sign as i32,
+                request_status: mpc::check_result_response:: RequestStatus::Processing as i32,
             });
 
             Ok(())
@@ -521,11 +523,11 @@ impl Handler<ProtocolOutputO> for Coordinator
         match do_it() {
             Ok(_) => {}
             Err(_) => {
-                let _ = self.tx_res.send(ResponsePayload {
+                let _ = self.tx_res.send(CheckResultResponse {
                     request_id: msg.input.inner.request_id.clone(),
-                    result: None,
-                    request_type: RequestType::SIGN,
-                    request_status: RequestStatus::ERROR,
+                    result: "".to_owned(),
+                    request_type: mpc::check_result_response::RequestType::Sign as i32,
+                    request_status: mpc::check_result_response::RequestStatus::Error as i32,
                 });
             }
         }
@@ -551,11 +553,11 @@ impl Handler<ProtocolOutputS> for Coordinator
 
         // log::info!("Sign request done {:?} sig: {:?}", msg.input, sig);
         let request_id = msg.input.inner.request_id;
-        let _ = self.tx_res.send(ResponsePayload {
+        let _ = self.tx_res.send(CheckResultResponse {
             request_id,
-            result: Some(sig),
-            request_type: RequestType::SIGN,
-            request_status: RequestStatus::DONE,
+            result: sig,
+            request_type: mpc::check_result_response:: RequestType::Sign as i32,
+            request_status: mpc::check_result_response:: RequestStatus::Done as i32,
         });
     }
 }

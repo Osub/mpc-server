@@ -3,9 +3,8 @@ use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use anyhow::{Result};
 use serde_json::value::RawValue;
-use crate::core::CoreMessage;
-use crate::{KeygenPayload, SignPayload};
-use crate::wire::WireMessage;
+use crate::pb::types::{WireMessage, CoreMessage};
+use crate::pb::mpc;
 
 #[derive(Message)]
 #[rtype(result = "()")]
@@ -27,8 +26,8 @@ pub(crate) enum CoordinatorMessage {
     Incoming(WireMessage),
     Retry(RetryMessage),
     Outgoing(CoreMessage),
-    SignRequest(SignPayload),
-    KeygenRequest(KeygenPayload),
+    SignRequest(mpc::SignRequest),
+    KeygenRequest(mpc::KeygenRequest),
 }
 
 #[derive(Message, Clone)]

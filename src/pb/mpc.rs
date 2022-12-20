@@ -1,3 +1,4 @@
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct KeygenRequest {
@@ -10,12 +11,14 @@ pub struct KeygenRequest {
     #[prost(uint32, tag = "3")]
     pub threshold: u32,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct KeygenResponse {
     #[prost(string, tag = "1")]
     pub request_id: ::prost::alloc::string::String,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SignRequest {
@@ -30,18 +33,21 @@ pub struct SignRequest {
     #[prost(string, tag = "4")]
     pub hash: ::prost::alloc::string::String,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SignResponse {
     #[prost(string, tag = "1")]
     pub request_id: ::prost::alloc::string::String,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CheckResultRequest {
     #[prost(string, tag = "1")]
     pub request_id: ::prost::alloc::string::String,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CheckResultResponse {
@@ -56,6 +62,7 @@ pub struct CheckResultResponse {
 }
 /// Nested message and enum types in `CheckResultResponse`.
 pub mod check_result_response {
+    #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(
         Clone,
         Copy,
@@ -86,6 +93,7 @@ pub mod check_result_response {
             }
         }
     }
+    #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(
         Clone,
         Copy,
@@ -103,6 +111,7 @@ pub mod check_result_response {
         Received = 1,
         Processing = 2,
         Done = 3,
+        Error = 4,
     }
     impl RequestStatus {
         /// String value of the enum field names used in the ProtoBuf definition.
@@ -115,6 +124,7 @@ pub mod check_result_response {
                 RequestStatus::Received => "RECEIVED",
                 RequestStatus::Processing => "PROCESSING",
                 RequestStatus::Done => "DONE",
+                RequestStatus::Error => "ERROR",
             }
         }
     }
@@ -178,7 +188,6 @@ pub mod mpc_client {
             self.inner = self.inner.accept_compressed(encoding);
             self
         }
-        /// Keygen defines a rpc handler method for MsgTransfer.
         pub async fn keygen(
             &mut self,
             request: impl tonic::IntoRequest<super::KeygenRequest>,
@@ -239,7 +248,6 @@ pub mod mpc_server {
     /// Generated trait containing gRPC methods that should be implemented for use with MpcServer.
     #[async_trait]
     pub trait Mpc: Send + Sync + 'static {
-        /// Keygen defines a rpc handler method for MsgTransfer.
         async fn keygen(
             &self,
             request: tonic::Request<super::KeygenRequest>,

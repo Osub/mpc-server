@@ -10,7 +10,7 @@ use actix::Addr;
 pub use signer::*;
 pub use player::*;
 pub use coordinator::*;
-use crate::core::Request;
+use crate::pb::types::request::Request;
 
 use kv_log_macro as log;
 use crate::actors::messages::CoordinatorMessage;

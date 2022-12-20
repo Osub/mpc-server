@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package types;
+
+import "mpc.proto";
+
+message Request {
+  oneof request {
+    mpc.KeygenRequest keygen = 1;
+    mpc.SignRequest sign = 2;
+  }
+}
+
+message WireMessage {
+  string room = 1;
+  string payload = 2;
+  string sender_public_key = 3;
+  string signature = 4;
+}
+
+message CoreMessage {
+  string room = 1;
+  string message = 2;
+}

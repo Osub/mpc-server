@@ -2,11 +2,10 @@ syntax = "proto3";
 
 package mpc;
 
-option go_package = "github.com/avalido/mpc-controller/mpcclient";
+option go_package = "github.com/avalido/mpc-controller/core/mpc";
 
 // Mpc defines the MPC API from server.
 service Mpc {
-  // Keygen defines a rpc handler method for MsgTransfer.
   rpc Keygen(KeygenRequest) returns (KeygenResponse);
   rpc Sign(SignRequest) returns (SignResponse);
   rpc CheckResult(CheckResultRequest) returns (CheckResultResponse);
@@ -48,6 +47,7 @@ message CheckResultResponse{
     RECEIVED = 1;
     PROCESSING = 2;
     DONE = 3;
+    ERROR = 4;
   }
   string request_id = 1;
   string result = 2;

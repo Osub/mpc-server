@@ -4,9 +4,8 @@ use redis::{AsyncCommands, Client, Msg};
 use redis::aio::Connection;
 use secp256k1::{PublicKey, SecretKey};
 
-use crate::core::CoreMessage;
 use crate::transport::{parse_signed, sign_envelope, take_non_owned};
-use crate::wire::WireMessage;
+use crate::pb::types::{WireMessage, CoreMessage};
 
 pub struct RedisClient {
     channel_name: String,
