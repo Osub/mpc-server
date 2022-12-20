@@ -7,7 +7,7 @@ use secp256k1::{PublicKey, SecretKey};
 use crate::core::CoreMessage;
 use crate::transport::{sign_envelope, take_non_owned};
 use crate::transport::parse_signed;
-use crate::wire::WireMessage;
+use crate::pb::types::WireMessage;
 
 pub async fn join_computation_via_messenger(
     url: surf::Url,

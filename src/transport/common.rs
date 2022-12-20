@@ -6,7 +6,7 @@ use secp256k1::{Message, PublicKey, SecretKey, sign, Signature, verify};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::wire::WireMessage;
+use crate::pb::types::WireMessage;
 use crate::core::CoreMessage;
 
 #[derive(Debug, Error)]

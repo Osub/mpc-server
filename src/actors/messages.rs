@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 use anyhow::{Result};
 use serde_json::value::RawValue;
 use crate::core::CoreMessage;
-// use crate::{KeygenPayload, SignPayload};
-use crate::wire::WireMessage;
+use crate::pb::types::WireMessage;
 use crate::pb::mpc;
 
 #[derive(Message)]

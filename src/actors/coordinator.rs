@@ -30,7 +30,7 @@ use crate::pb::mpc::{KeygenRequest, SignRequest};
 use crate::storage::{GroupStore, LocalShareStore, SledDbGroupStore, SledDbLocalShareStore};
 use crate::utils;
 use crate::utils::{extract_group_id, make_room_id};
-use crate::wire::WireMessage;
+use crate::pb::types::WireMessage;
 
 use super::messages::*;
 use super::MpcPlayer;
