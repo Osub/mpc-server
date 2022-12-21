@@ -2,12 +2,7 @@ use std::ops::Deref;
 use thiserror::Error;
 use anyhow::{Context, Result};
 
-use crate::core::StoredLocalShare;
-
-pub(crate) trait LocalShareStore {
-    fn save_local_share(&mut self, local_share: StoredLocalShare) -> Result<()>;
-    fn retrieve_local_share(&mut self, public_key: String) -> Result<StoredLocalShare>;
-}
+use crate::core::{LocalShareStore, StoredLocalShare};
 
 pub(crate) struct SledDbLocalShareStore {
     db: sled::Db,
@@ -18,7 +13,6 @@ impl SledDbLocalShareStore {
         Self { db }
     }
 }
-
 
 impl LocalShareStore for SledDbLocalShareStore {
     fn save_local_share(&mut self, local_share: StoredLocalShare) -> Result<()> {

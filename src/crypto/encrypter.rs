@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 
 use crate::actors::messages::{Encrypted, GenericProtocolMessage};
+use crate::core::GroupStore;
 use crate::pb::types::CoreMessage;
-use crate::storage::{GroupStore, SledDbGroupStore};
+use crate::storage::SledDbGroupStore;
 use crate::utils::extract_group_id;
 
 pub(crate) trait Encrypter {

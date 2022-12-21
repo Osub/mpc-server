@@ -23,11 +23,11 @@ use crate::actors::aliases::*;
 use crate::actors::msg_utils::describe_message;
 use crate::actors::types::{EnrichedSignRequest, SignTask};
 
-use crate::core::{MpcGroup, PublicKeyGroup, StoredLocalShare};
+use crate::core::{GroupStore, LocalShareStore, MpcGroup, PublicKeyGroup, StoredLocalShare};
 use crate::crypto::{Decrypter, Encrypter, SimpleDecrypter, SimpleEncrypter};
 use crate::pb::mpc;
 use crate::pb::mpc::{KeygenRequest, SignRequest};
-use crate::storage::{GroupStore, LocalShareStore, SledDbGroupStore, SledDbLocalShareStore};
+use crate::storage::{SledDbGroupStore, SledDbLocalShareStore};
 use crate::utils;
 use crate::utils::{extract_group_id, make_room_id};
 use crate::pb::types::{WireMessage, CoreMessage};
