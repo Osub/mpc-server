@@ -1,11 +1,6 @@
 use anyhow::{Context, Result};
 use thiserror::Error;
-use crate::core::PublicKeyGroup;
-
-pub trait GroupStore {
-    fn retrieve_group(&mut self, group_id: String) -> Result<PublicKeyGroup>;
-    fn save_group(&mut self, group: PublicKeyGroup) -> Result<()>;
-}
+use crate::core::{GroupStore, PublicKeyGroup};
 
 pub struct SledDbGroupStore {
     db: sled::Db,

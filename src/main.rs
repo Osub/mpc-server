@@ -204,10 +204,10 @@ fn main() -> Result<(), AppError> {
             .run()
     };
     let mpc_server = move || {
-        let mpcServer = MpcImp::new(tx.clone(), tx_res.clone(), results_db.clone());
+        let instance = MpcImp::new(tx.clone(), tx_res.clone(), results_db.clone());
         let addr = format!("{}:{}", args.address, args.port).parse().unwrap();
         tonic::transport::Server::builder()
-            .add_service(MpcServer::new(mpcServer))
+            .add_service(MpcServer::new(instance))
             .serve(addr)
     };
     let combined = || async {

@@ -8,7 +8,7 @@ mod aliases;
 
 use actix::Addr;
 pub use signer::*;
-pub use player::*;
+pub(crate) use player::*;
 pub use coordinator::*;
 use crate::pb::types::request::Request;
 
