@@ -9,7 +9,7 @@ pub(crate) trait Decrypter {
 }
 
 pub(crate) struct SimpleDecrypter {
-    sk: Vec<u8>,
+    sk: SecretKey,
 }
 
 impl Decrypter for SimpleDecrypter {
@@ -21,7 +21,7 @@ impl Decrypter for SimpleDecrypter {
                     serde_json::from_str::<Encrypted>(m.body.to_string().as_ref()).context("parse encrypted")?;
 
                 let decrypted =
-                    PublicKeyGroup::decrypt(self.sk.as_ref(), encrypted_message.encrypted.as_str()).context("decrypt")?;
+                    PublicKeyGroup::decrypt(&self.sk, encrypted_message.encrypted.as_str()).context("decrypt")?;
 
                 let decrypted = serde_json::value::RawValue::from_string(decrypted).context("convert to RawValue")?;
                 m.body = decrypted;
@@ -38,7 +38,6 @@ impl Decrypter for SimpleDecrypter {
 
 impl SimpleDecrypter {
     pub fn new(sk: SecretKey) -> Self {
-        let sk = sk.serialize().to_vec();
         Self { sk }
     }
 }

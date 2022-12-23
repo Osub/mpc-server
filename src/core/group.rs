@@ -3,11 +3,12 @@ extern crate base64;
 use anyhow::Context;
 #[allow(unused_imports)]
 use anyhow::Result;
-use ecies::{encrypt, decrypt};
 use round_based::Msg;
+use secp256k1::{PublicKey, SecretKey};
 use serde::{Deserialize, Serialize};
 
 use thiserror::Error;
+use crate::crypto::{SafeDecryptExt, SafeEncryptExt};
 
 pub trait MpcGroup {
     fn valid_msg<T>(&self, sender_public_key: &str, msg: &Msg<T>) -> bool;
@@ -58,13 +59,14 @@ impl PublicKeyGroup {
     pub fn encrypt(&self, index: usize, plaintext: &str) -> Result<String> {
         let pk = self.get_public_key(index)?;
         let pk = hex::decode(pk)?;
-        let ciphertext = encrypt(pk.as_slice(), plaintext.as_bytes())?;
+        let pk = PublicKey::parse_slice(pk.as_slice(), None).context("parse public key")?;
+        let ciphertext = pk.encrypt(plaintext.as_bytes())?;
         Ok(base64::encode(ciphertext))
     }
 
-    pub fn decrypt(sk:&[u8], ciphertext: &str) -> Result<String> {
+    pub fn decrypt(sk:&SecretKey, ciphertext: &str) -> Result<String> {
         let ciphertext = base64::decode(ciphertext).context("decode base64 ciphertext")?;
-        let plaintext = decrypt(sk, ciphertext.as_slice()).context("decrypt")?;
+        let plaintext = sk.decrypt(ciphertext.as_slice()).context("decrypt")?;
         let plaintext = std::str::from_utf8(plaintext.as_slice()).context("decode utf8")?;
         Ok(plaintext.to_string())
     }

@@ -1,22 +1,21 @@
 use std::ops::Deref;
 use thiserror::Error;
 use curv::elliptic::curves::Secp256k1;
-use ecies::{encrypt, decrypt};
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::LocalKey;
-use secp256k1::SecretKey;
+use secp256k1::{PublicKey, SecretKey};
 use anyhow::{Context, Result};
 
 use crate::core::{EncryptedStoredLocalShare, LocalShareStore, StoredLocalShare};
+use crate::crypto::{SafeDecryptExt, SafeEncryptExt};
 
 pub(crate) struct SledDbLocalShareStore {
-    sk: Vec<u8>,
+    sk: SecretKey,
     db: sled::Db,
 }
 
 impl SledDbLocalShareStore {
     pub(crate) fn new(sk: SecretKey, db: sled::Db) -> Self
     {
-        let sk = sk.serialize().to_vec();
         Self { sk, db }
     }
 }
@@ -29,7 +28,8 @@ impl LocalShareStore for SledDbLocalShareStore {
         let share_bytes = serde_json::to_vec(&local_share.share).context("encoding share")?;
 
         let own_pk = hex::decode(&local_share.own_public_key).context("decode own public key")?;
-        let ciphertext = encrypt(own_pk.as_slice(), share_bytes.as_slice()).context("encrypt share")?;
+        let own_pk = PublicKey::parse_slice(own_pk.as_slice(), None).context("parse public key")?;
+        let ciphertext = own_pk.encrypt(share_bytes.as_slice()).context("encrypt share")?;
         let encrypted = EncryptedStoredLocalShare {
             public_keys: local_share.public_keys,
             own_public_key: local_share.own_public_key,
@@ -53,7 +53,7 @@ impl LocalShareStore for SledDbLocalShareStore {
             .context("Decode local share.")?;
         let encrypted_share = hex::decode(encrypted.encrypted_share)
             .context("decode share")?;
-        let decrypted = decrypt(&self.sk, encrypted_share.as_slice())
+        let decrypted = self.sk.decrypt(encrypted_share.as_slice())
             .context("decrypt share")?;
         let lk = serde_json::from_slice::<LocalKey<Secp256k1>>(decrypted.as_slice())
             .context("deserialize local key")?;
