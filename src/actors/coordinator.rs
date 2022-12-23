@@ -79,7 +79,7 @@ impl Coordinator {
         let sink: Box<dyn Sink<CoreMessage, Error=anyhow::Error>> = Box::new(sink);
         let pk = PublicKey::from_secret_key(&sk).serialize_compressed().encode_hex();
         let group_store = Box::new(SledDbGroupStore::new(db.clone()));
-        let local_share_store = Box::new(SledDbLocalShareStore::new(db.clone()));
+        let local_share_store = Box::new(SledDbLocalShareStore::new(sk.clone(), db.clone()));
         let encrypter = Box::new(SimpleEncrypter::new(db));
         let decrypter = Box::new(SimpleDecrypter::new(sk));
 

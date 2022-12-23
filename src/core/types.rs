@@ -11,6 +11,13 @@ pub(crate) struct StoredLocalShare {
     pub share: LocalKey<Secp256k1>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct EncryptedStoredLocalShare {
+    pub public_keys: Vec<String>,
+    pub own_public_key: String,
+    pub encrypted_share: String,
+}
+
 pub trait GroupStore {
     fn retrieve_group(&mut self, group_id: String) -> Result<PublicKeyGroup>;
     fn save_group(&mut self, group: PublicKeyGroup) -> Result<()>;
