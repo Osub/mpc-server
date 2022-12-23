@@ -28,8 +28,10 @@ gen_keypair() {
   DIR=tmp/party${IND}
   mkdir -p $DIR
   echo "Preparing key-pair for party ${IND}"
+  rm $DIR/password
   /bin/echo -n "RBuCJbmWY1Mtcl5LoMRqkQQpT5GJmCEvbuRR7ewCPDATBzFtm9a6jhIovftgddmL" > $DIR/password
   /bin/echo -n "${SECKEYS[$((IND-1))]}" > $DIR/key
+  chmod 400 $DIR/password
 }
 
 start_mpc_server(){
