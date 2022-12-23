@@ -132,7 +132,7 @@ impl Coordinator {
     fn handle_sign_request(&mut self, req: SignRequest, ctx: &mut Context<Self>) -> Result<()> {
         log::info!("Handling request", {request: serde_json::to_string(&req).unwrap_or("".to_string())});
         prom::COUNTER_REQUESTS_SIGN_HANDLED.inc();
-        let local_share = self.local_share_store.retrieve_local_share(req.public_key.clone()).context("Retrieve local share.")?;
+        let local_share = self.local_share_store.retrieve(req.public_key.clone()).context("Retrieve local share.")?;
         let group = PublicKeyGroup::new(
             local_share.public_keys,
             local_share.share.t,
@@ -459,7 +459,7 @@ impl Handler<ProtocolOutputKG> for Coordinator
         log::info!("Public key is {:?}", sum_pk);
         let _share = msg.output.clone();
         let request_id = msg.input.request_id.clone();
-        let saved = self.local_share_store.save_local_share(StoredLocalShare {
+        let saved = self.local_share_store.save(StoredLocalShare {
             public_keys: msg.input.participant_public_keys,
             own_public_key: self.pk_str.clone(),
             share: msg.output,

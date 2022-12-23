@@ -12,17 +12,24 @@ MQ_CONFIG=$([[ ! -z "$USE_REDIS" ]] && echo "-r redis://localhost/" || echo "-m 
 echo "Using message queue $MQ_CONFIG"
 
 NUM_PARTIES=3
-PUBKEYS=("03c20e0c088bb20027a77b1d23ad75058df5349c7a2bfafff7516c44c6f69aa66d" "03d0639e479fa1ca8ee13fd966c216e662408ff00349068bdc9c6966c4ea10fe3e" "0373ee5cd601a19cd9bb95fe7be8b1566b73c51d3e7e375359c129b1d77bb4b3e6")
-SECKEYS=("f6826fc16547130848ea32196c95457b4698feded1a8f109eb224ddcd27d66af7d0f88b44d2765a4a567a8999a4410852510deacdcb87e0c7cfe23fa1d0090a8" "9f099ed7a7615ce2d7de100a8feaf39adfa904146ee523f6dacaad6a3f69b4e9d10f2b01c13dc31b1265f9042d7437f63ad81c5113dec541bb799e49dd21c571" "e3858ec05c7762d79de30428a2561a520123b1e2b16687ae57ba0ba550e07ffac49861bab15fe62678435c8ae2a57522752a7b8af68d7591ca0e7b44c5f64a4d")
-#PLAINSECKEYS=("59d1c6956f08477262c9e827239457584299cf583027a27c1d472087e8c35f21" "6c326909bee727d5fc434e2c75a3e0126df2ec4f49ad02cdd6209cf19f91da33" "5431ed99fbcc291f2ed8906d7d46fdf45afbb1b95da65fecd4707d16a6b3301b")
+PUBKEYS=(
+'0373ee5cd601a19cd9bb95fe7be8b1566b73c51d3e7e375359c129b1d77bb4b3e6'
+'03c20e0c088bb20027a77b1d23ad75058df5349c7a2bfafff7516c44c6f69aa66d'
+'03d0639e479fa1ca8ee13fd966c216e662408ff00349068bdc9c6966c4ea10fe3e'
+)
+SECKEYS=(
+'{"address":"3600323b486f115ce127758ed84f26977628eeaa","crypto":{"cipher":"aes-128-ctr","ciphertext":"11ea4ed8f5682ba1ebc6369b484f42ad31ca1d250ecbf123a489e1589590d000","cipherparams":{"iv":"274338bdcb1f715198d7a3afcd88e84a"},"kdf":"scrypt","kdfparams":{"dklen":32,"n":262144,"p":1,"r":8,"salt":"fdc6be82757e600e97bfc61402ed41a11afcd2ef36a8d112038459ee7af0ec48"},"mac":"775ce29e39855ea5fe53c140c0c7929a612a0437fd3aa2311da862680f670948"},"id":"66604f01-65d3-4a42-bb0e-fce3cbd8d03f","version":3}'
+'{"address":"3051ba2d313840932b7091d2e8684672496e9a4b","crypto":{"cipher":"aes-128-ctr","ciphertext":"71ca430ab0785a421421f9107e842b90423df3e1682aeeed058ccab575a0fef9","cipherparams":{"iv":"295c3ddc4c05f8bf777c6940bede075d"},"kdf":"scrypt","kdfparams":{"dklen":32,"n":262144,"p":1,"r":8,"salt":"349e267e65b294edc7fd34b59b42a255a417e01dacf760fddef16d89c0dbaabd"},"mac":"9b5ba31d30bde66a1a5e774f8c73699cefc1ad4fee1f16f1c4193834b4ce5f73"},"id":"2a14b094-c7a9-41aa-84bd-c7ad228fc78b","version":3}'
+'{"address":"7ac8e2083e3503be631a0557b3f2a8543eaadd90","crypto":{"cipher":"aes-128-ctr","ciphertext":"2275391cc83a56fc97fbdd2954e647ee974f4812b188a5499dc80c58f9ccb2ac","cipherparams":{"iv":"8ebb1ea980880135326e65ef422dc142"},"kdf":"scrypt","kdfparams":{"dklen":32,"n":262144,"p":1,"r":8,"salt":"4f4c6e84a4298402e33ae1c7443f30ec20a34faa92d6411ed870e640e1b12b5d"},"mac":"852431422f726097223adaa3ded2497dfc8268c7ba56b81f7bf2a357f5e7e4db"},"id":"8ad90eb0-663f-46c5-9ea5-b10f2e0aa759","version":3}'
+)
 
 gen_keypair() {
   IND=$1
   DIR=tmp/party${IND}
   mkdir -p $DIR
   echo "Preparing key-pair for party ${IND}"
-  /bin/echo -n "${PUBKEYS[$((IND-1))]}" > $DIR/pub.key
-  /bin/echo -n "${SECKEYS[$((IND-1))]}" > $DIR/pri.key
+  /bin/echo -n "RBuCJbmWY1Mtcl5LoMRqkQQpT5GJmCEvbuRR7ewCPDATBzFtm9a6jhIovftgddmL" > $DIR/password
+  /bin/echo -n "${SECKEYS[$((IND-1))]}" > $DIR/key
 }
 
 start_mpc_server(){
@@ -31,8 +38,9 @@ start_mpc_server(){
   mkdir -p $DIR
   PORT=800${IND}
   echo "Starting MPC Server ${i}"
-  RUST_BACKTRACE=full $SCRIPT_DIR/../target/debug/mpc-server -s ${DIR}/pri.key \
-  --password RBuCJbmWY1Mtcl5LoMRqkQQpT5GJmCEvbuRR7ewCPDATBzFtm9a6jhIovftgddmL \
+  RUST_BACKTRACE=full $SCRIPT_DIR/../target/debug/mpc-server \
+  --keystore-path ${DIR}/key \
+  --password-path ${DIR}/password \
   --port ${PORT} $MQ_CONFIG  --db-path ${DIR}/db > ${DIR}/log.txt 2>&1 &
 }
 
@@ -66,9 +74,9 @@ echo "Waiting for server to start up"
 sleep 5
 
 echo "4. Run Keygen"
-PK1=$(cat tmp/party1/pub.key)
-PK2=$(cat tmp/party2/pub.key)
-PK3=$(cat tmp/party3/pub.key)
+PK1=${PUBKEYS[0]}
+PK2=${PUBKEYS[1]}
+PK3=${PUBKEYS[2]}
 PAYLOAD=$(cat <<-END
   {"request_id": "001", "participant_public_keys": ["${PK1}", "${PK2}", "${PK3}"], "threshold": 1}
 END
@@ -81,7 +89,7 @@ grpcurl -plaintext -import-path ${PROTO_DIR} -proto mpc.proto -d "${PAYLOAD}" 12
 grpcurl -plaintext -import-path ${PROTO_DIR} -proto mpc.proto -d "${PAYLOAD}" 127.0.0.1:8003 mpc.Mpc/Keygen
 
 echo -e "\nWaiting for Keygen to complete"
-sleep 5
+sleep 50
 
 echo "5. Checking Keygen result"
 PAYLOAD=$(cat <<-END
