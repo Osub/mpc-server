@@ -1,17 +1,11 @@
 extern crate base64;
 extern crate json_env_logger;
 
-
-use std::path::PathBuf;
-
 use ::redis::Client;
 use actix::prelude::*;
 use actix_web::{App, HttpResponse, HttpServer, middleware, Responder, web};
 use anyhow::{Context, Result};
-
-
 use prometheus::{Encoder, TextEncoder};
-use secp256k1::{PublicKey, SecretKey};
 use structopt::StructOpt;
 use thiserror::Error;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -19,10 +13,9 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use cli::Cli;
 
 use crate::actors::{Coordinator, handle};
-use crate::pb::types::request::Request;
-use crate::key::decrypt;
 use crate::pb::mpc::CheckResultResponse;
 use crate::pb::mpc::mpc_server::MpcServer;
+use crate::pb::types::request::Request;
 use crate::server::MpcImp;
 use crate::transport::{join_computation_via_messenger, join_computation_via_redis};
 
@@ -30,7 +23,6 @@ mod core;
 mod actors;
 mod cli;
 mod transport;
-mod key;
 mod prom;
 mod utils;
 mod storage;
