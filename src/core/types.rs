@@ -63,6 +63,6 @@ pub trait GroupStore {
 }
 
 pub(crate) trait LocalShareStore {
-    fn save_local_share(&mut self, local_share: StoredLocalShare) -> Result<()>;
-    fn retrieve_local_share(&mut self, public_key: String) -> Result<StoredLocalShare>;
+    fn save(&mut self, local_share: StoredLocalShare) -> Result<()>;
+    fn retrieve(&mut self, public_key: String) -> Result<StoredLocalShare>;
 }

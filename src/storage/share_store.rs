@@ -18,7 +18,7 @@ impl SledDbLocalShareStore {
 }
 
 impl LocalShareStore for SledDbLocalShareStore {
-    fn save_local_share(&mut self, local_share: StoredLocalShare) -> Result<()> {
+    fn save(&mut self, local_share: StoredLocalShare) -> Result<()> {
         let sum_pk_bytes = local_share.share.public_key().to_bytes(true);
         let sum_pk = hex::encode(sum_pk_bytes.deref());
         let ov: Option<&[u8]> = None;
@@ -33,7 +33,7 @@ impl LocalShareStore for SledDbLocalShareStore {
         ).context("Save to db.")?;
         Ok(())
     }
-    fn retrieve_local_share(&mut self, public_key: String) -> Result<StoredLocalShare> {
+    fn retrieve(&mut self, public_key: String) -> Result<StoredLocalShare> {
         let stored = self.db.get(public_key.as_bytes())?
             .ok_or_else(|| LocalShareStoreError::LocalShareNotFound(public_key.clone()))
             .context("Retrieving local share.")?;
