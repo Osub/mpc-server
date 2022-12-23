@@ -37,6 +37,7 @@ mod storage;
 mod crypto;
 mod server;
 mod pb;
+mod keystore;
 
 #[derive(Debug, Error)]
 enum AppError {
@@ -91,17 +92,6 @@ async fn metrics() -> impl Responder {
     }
 }
 
-fn get_secret_key(path: PathBuf, password: String) -> Result<(SecretKey, PublicKey)> {
-    let sk_hex = std::fs::read_to_string(path).context("Read secret key file.")?;
-    let sk_bytes = hex::decode(sk_hex).context("Decode hex secret key.")?;
-
-    let sk = decrypt(password.as_bytes(), sk_bytes.as_slice())?;
-
-    let sk = SecretKey::parse_slice(sk.as_slice()).context("Parse secret key.")?;
-    let pk = PublicKey::from_secret_key(&sk);
-    Ok((sk, pk))
-}
-
 async fn precheck(args: Cli) -> Result<()> {
     let args0 = args.clone();
     match (args0.messenger_address, args0.redis_url) {
@@ -142,7 +132,7 @@ async fn bootstrap(args: Cli, rx: UnboundedReceiver<Request>, tx_res: UnboundedS
 }
 
 async fn use_messenger(args: Cli, mut rx: UnboundedReceiver<Request>, tx_res: UnboundedSender<CheckResultResponse>) {
-    let (sk, _) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't get secret key.").unwrap();
+    let (sk, _) = keystore::get_secret_key(args.keystore_path.clone(), args.password_path.clone()).context("Can't get secret key.").unwrap();
     let local_shares_path = args.db_path.join("local_shares");
     let local_share_db: sled::Db = sled::open(local_shares_path).unwrap();
 
@@ -156,7 +146,7 @@ async fn use_messenger(args: Cli, mut rx: UnboundedReceiver<Request>, tx_res: Un
 
 
 async fn use_redis(args: Cli, mut rx: UnboundedReceiver<Request>, tx_res: UnboundedSender<CheckResultResponse>) {
-    let (sk, _) = get_secret_key(args.secret_key_path.clone(), args.password.clone()).context("Can't get secret key.").unwrap();
+    let (sk, _) = keystore::get_secret_key(args.keystore_path.clone(), args.password_path.clone()).context("Can't get secret key.").unwrap();
     let local_shares_path = args.db_path.join("local_shares");
     let local_share_db: sled::Db = sled::open(local_shares_path).unwrap();
 

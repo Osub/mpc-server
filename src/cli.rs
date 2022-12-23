@@ -18,10 +18,10 @@ pub struct Cli {
     pub port: u16,
 
     #[structopt(short, long)]
-    pub secret_key_path: PathBuf,
+    pub keystore_path: PathBuf,
 
     #[structopt(long)]
-    pub password: String,
+    pub password_path: PathBuf,
 
     #[structopt(short, long)]
     pub db_path: PathBuf,
